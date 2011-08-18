@@ -10,7 +10,7 @@
 namespace RAYCAST_MESH
 {
 
-typedef std::vector< RmUint > TriVector;
+typedef std::vector< RmUint32 > TriVector;
 
 /* a = b - c */
 #define vector(a,b,c) \
@@ -64,31 +64,6 @@ static inline bool rayIntersectsTriangle(const RmReal *p,const RmReal *d,const R
 		// but not a ray intersection
 		return (false);
 }
-
-
-
-
-static inline RmReal distToPlane(const RmReal *plane,const RmReal *p) // computes the distance of this point from the plane.
-{
-	return p[0]*plane[0]+p[1]*plane[1]+p[2]*plane[2]+plane[3];
-}
-
-static inline bool intersectsPlane(const RmReal *plane,const RmReal *from,const RmReal *to)
-{
-	bool ret = false;
-	RmReal d1 = distToPlane(plane,from);
-	RmReal d2 = distToPlane(plane,to);
-	if ( d1 < 0 )
-	{
-		ret = d2 > 0;
-	}
-	else
-	{
-		ret = d2 < 0;
-	}
-	return ret;
-}
-
 
 static RmReal computePlane(const RmReal *A,const RmReal *B,const RmReal *C,RmReal *n) // returns D
 {
@@ -266,9 +241,9 @@ public:
 	// clips input polygon against the frustum.  Places output polygon
 	// in 'output'.
 	inline ClipResult Clip(const Vec3d *input, // input vertices.
-		RmUint           vcount,   // input vertex count.
+		RmUint32           vcount,   // input vertex count.
 		Vec3d       *output,
-		RmUint          &ocount) const;
+		RmUint32          &ocount) const;
 
 	inline ClipResult ClipRay(const Vec3d &r1a,
 		const Vec3d &r2a,
@@ -306,7 +281,7 @@ int FrustumClipper::ClipCode(const Vec3d &pos,int &ocode,int &acode) const
 }
 
 
-ClipResult FrustumClipper::Clip(const Vec3d *polygon,RmUint in_count,Vec3d *dest,RmUint &ocount) const
+ClipResult FrustumClipper::Clip(const Vec3d *polygon,RmUint32 in_count,Vec3d *dest,RmUint32 &ocount) const
 {
 
 	ocount    = 0;
@@ -319,7 +294,7 @@ ClipResult FrustumClipper::Clip(const Vec3d *polygon,RmUint in_count,Vec3d *dest
 	ClipVertex *input  = list1;
 	ClipVertex *output = list2;
 
-	for (RmUint i=0; i<in_count; i++)
+	for (RmUint32 i=0; i<in_count; i++)
 	{
 		input[i].Set( polygon[i], ClipCode(polygon[i], ocode, acode) );
 	}
@@ -337,20 +312,20 @@ ClipResult FrustumClipper::Clip(const Vec3d *polygon,RmUint in_count,Vec3d *dest
 
 	// ok..need to clip it!!
 
-	RmUint l;
+	RmUint32 l;
 	l = CP_LAST;
 
-	for (RmUint i=0; i<l; i++)
+	for (RmUint32 i=0; i<l; i++)
 	{
-		RmUint mask = (1<<i); // this is the clip mask.
+		RmUint32 mask = (1<<i); // this is the clip mask.
 		if ( ocode & mask ) // if any vertices are clipped against this plane
 		{
 			ocount    = 0;
 			int new_ocode = 0;
 			int new_acode = 0xFFFF;
-			for (RmUint j=0; j<in_count; j++)
+			for (RmUint32 j=0; j<in_count; j++)
 			{
-				RmUint k = j+1;
+				RmUint32 k = j+1;
 				if ( k == in_count ) k = 0;
 				ClipVertex &v1 = input[j];
 				ClipVertex &v2 = input[k];
@@ -386,7 +361,7 @@ ClipResult FrustumClipper::Clip(const Vec3d *polygon,RmUint in_count,Vec3d *dest
 		}
 	}
 
-	for (RmUint i=0; i<in_count; i++)
+	for (RmUint32 i=0; i<in_count; i++)
 	{
 		dest[i] = input[i].mPos;
 	}
@@ -558,9 +533,9 @@ public:
 		mMax[2] = z;
 	}
 
-	RmUint clipTestXYZ(const RmReal *p) const
+	RmUint32 clipTestXYZ(const RmReal *p) const
 	{
-		RmUint ocode = 0;
+		RmUint32 ocode = 0;
 		if ( p[0] < mMin[0] ) ocode|=OLEFT;
 		if ( p[0] > mMax[0] ) ocode|=ORIGHT;
 
@@ -603,20 +578,20 @@ public:
 		verts[1] = Vec3d(p2);
 		verts[2] = Vec3d(p3);
 
-		RmUint ocount;
+		RmUint32 ocount;
 		ClipResult result = clipper.Clip(verts,3,outVerts,ocount);
 		return result != CR_OUTSIDE;
 	}
 
 
-	bool containsLineSegment(const RmReal *p1,const RmReal *p2,RmUint &acode) const
+	bool containsLineSegment(const RmReal *p1,const RmReal *p2,RmUint32 &acode) const
 	{
 		FrustumClipper clipper;
 		clipper.SetFrustum(mMin,mMax);
 		acode = 0;
-		RmUint ocode1 = clipTestXYZ(p1);
+		RmUint32 ocode1 = clipTestXYZ(p1);
 		if ( !ocode1 ) return true;
-		RmUint ocode2 = clipTestXYZ(p2);
+		RmUint32 ocode2 = clipTestXYZ(p2);
 		if ( !ocode2 ) return true;
 		acode = ocode1 & ocode2;
 		if ( acode ) return false;
@@ -647,8 +622,7 @@ class NodeInterface
 {
 public:
 	virtual NodeAABB * getNode(void) = 0;
-	virtual void getFaceNormal(RmUint tri,RmReal *faceNormal) const = 0;
-	virtual const RmReal * getPlaneEquation(RmUint tri) const = 0;
+	virtual void getFaceNormal(RmUint32 tri,RmReal *faceNormal) = 0;
 };
 
 
@@ -665,9 +639,9 @@ public:
 			mTriIndices= NULL;
 		}
 
-		NodeAABB(RmUint vcount,const RmReal *vertices,RmUint tcount,RmUint *indices,
-			RmUint maxDepth,	// Maximum recursion depth for the triangle mesh.
-			RmUint minLeafSize,	// minimum triangles to treat as a 'leaf' node.
+		NodeAABB(RmUint32 vcount,const RmReal *vertices,RmUint32 tcount,RmUint32 *indices,
+			RmUint32 maxDepth,	// Maximum recursion depth for the triangle mesh.
+			RmUint32 minLeafSize,	// minimum triangles to treat as a 'leaf' node.
 			RmReal	minAxisSize,
 			NodeInterface *callback)	// once a particular axis is less than this size, stop sub-dividing.
 
@@ -677,14 +651,14 @@ public:
 			mTriIndices = NULL;
 			TriVector triangles;
 			triangles.reserve(tcount);
-			for (RmUint i=0; i<tcount; i++)
+			for (RmUint32 i=0; i<tcount; i++)
 			{
 				triangles.push_back(i);
 			}
 			mBounds.setMin( vertices );
 			mBounds.setMax( vertices );
 			const RmReal *vtx = vertices+3;
-			for (RmUint i=1; i<vcount; i++)
+			for (RmUint32 i=1; i<vcount; i++)
 			{
 				mBounds.include( vtx );
 				vtx+=3;
@@ -710,13 +684,13 @@ public:
 
 		// here is where we split the mesh..
 		void split(const TriVector &triangles,
-			RmUint vcount,
+			RmUint32 vcount,
 			const RmReal *vertices,
-			RmUint tcount,
-			const RmUint *indices,
-			RmUint depth,
-			RmUint maxDepth,	// Maximum recursion depth for the triangle mesh.
-			RmUint minLeafSize,	// minimum triangles to treat as a 'leaf' node.
+			RmUint32 tcount,
+			const RmUint32 *indices,
+			RmUint32 depth,
+			RmUint32 maxDepth,	// Maximum recursion depth for the triangle mesh.
+			RmUint32 minLeafSize,	// minimum triangles to treat as a 'leaf' node.
 			RmReal	minAxisSize,
 			NodeInterface *callback)	// once a particular axis is less than this size, stop sub-dividing.
 
@@ -739,12 +713,12 @@ public:
 				laxis = dz;
 			}
 
-			RmUint count = triangles.size();
+			RmUint32 count = triangles.size();
 
 			if ( count < minLeafSize || depth >= maxDepth || laxis < minAxisSize )
 			{ 
-				mTriIndices = (RmUint *)::malloc(sizeof(RmUint)*(count+1));
-				memcpy(mTriIndices,&triangles[0],count*sizeof(RmUint));
+				mTriIndices = (RmUint32 *)::malloc(sizeof(RmUint32)*(count+1));
+				memcpy(mTriIndices,&triangles[0],count*sizeof(RmUint32));
 				mTriIndices[count] = TRI_EOF;
 			}
 			else
@@ -762,12 +736,12 @@ public:
 
 				for (TriVector::const_iterator i=triangles.begin(); i!=triangles.end(); ++i)
 				{
-					RmUint tri = (*i); 
+					RmUint32 tri = (*i); 
 
 					{
-						RmUint i1 = indices[tri*3+0];
-						RmUint i2 = indices[tri*3+1];
-						RmUint i3 = indices[tri*3+2];
+						RmUint32 i1 = indices[tri*3+0];
+						RmUint32 i2 = indices[tri*3+1];
+						RmUint32 i3 = indices[tri*3+2];
 
 						const RmReal *p1 = &vertices[i1*3];
 						const RmReal *p2 = &vertices[i2*3];
@@ -878,7 +852,7 @@ public:
 		///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 		#define RAYAABB_EPSILON 0.00001f
 		//! Integer representation of a RmRealing-point value.
-		#define IR(x)	((RmUint&)x)
+		#define IR(x)	((RmUint32&)x)
 
 		bool intersectRayAABB(const RmReal MinB[3],const RmReal MaxB[3],const RmReal origin[3],const RmReal dir[3],RmReal coord[3])
 		{
@@ -887,7 +861,7 @@ public:
 			MaxT[0]=MaxT[1]=MaxT[2]=-1.0f;
 
 			// Find candidate planes.
-			for(RmUint i=0;i<3;i++)
+			for(RmUint32 i=0;i<3;i++)
 			{
 				if(origin[i] < MinB[i])
 				{
@@ -917,14 +891,14 @@ public:
 			}
 
 			// Get largest of the maxT's for final choice of intersection
-			RmUint WhichPlane = 0;
+			RmUint32 WhichPlane = 0;
 			if(MaxT[1] > MaxT[WhichPlane])	WhichPlane = 1;
 			if(MaxT[2] > MaxT[WhichPlane])	WhichPlane = 2;
 
 			// Check final candidate actually inside box
 			if(IR(MaxT[WhichPlane])&0x80000000) return false;
 
-			for(RmUint i=0;i<3;i++)
+			for(RmUint32 i=0;i<3;i++)
 			{
 				if(i!=WhichPlane)
 				{
@@ -978,7 +952,7 @@ public:
 							RmReal *hitNormal,
 							RmReal *hitDistance,
 							const RmReal *vertices,
-							const RmUint *indices,
+							const RmUint32 *indices,
 							RmReal &nearestDistance,
 							NodeInterface *callback,
 							unsigned char *raycastTriangles,
@@ -1002,18 +976,16 @@ public:
 
 			if ( mTriIndices )
 			{
-				const RmUint *scan = mTriIndices;
+				const RmUint32 *scan = mTriIndices;
 				while ( *scan != TRI_EOF )
 				{
-					RmUint tri = *scan++;
-//					const RmReal *planeEquation = callback->getPlaneEquation(tri);
-//					if ( intersectsPlane(planeEquation,from,to) )
+					RmUint32 tri = *scan++;
 					if ( raycastTriangles[tri] != raycastFrame )
 					{
 						raycastTriangles[tri] = raycastFrame;
-						RmUint i1 = indices[tri*3+0];
-						RmUint i2 = indices[tri*3+1];
-						RmUint i3 = indices[tri*3+2];
+						RmUint32 i1 = indices[tri*3+0];
+						RmUint32 i2 = indices[tri*3+1];
+						RmUint32 i3 = indices[tri*3+2];
 
 						const RmReal *p1 = &vertices[i1*3];
 						const RmReal *p2 = &vertices[i2*3];
@@ -1061,14 +1033,14 @@ public:
 		NodeAABB		*mLeft;			// left node
 		NodeAABB		*mRight;		// right node
 		BoundsAABB		mBounds;		// bounding volume of node
-		RmUint	*mTriIndices;	// if it is a leaf node; then these are the triangle indices.
+		RmUint32	*mTriIndices;	// if it is a leaf node; then these are the triangle indices.
 	};
 
 class MyRaycastMesh : public RaycastMesh, public NodeInterface
 {
 public:
 
-	MyRaycastMesh(RmUint vcount,const RmReal *vertices,RmUint tcount,const RmUint *indices,RmUint maxDepth,RmUint minLeafSize,RmReal minAxisSize)
+	MyRaycastMesh(RmUint32 vcount,const RmReal *vertices,RmUint32 tcount,const RmUint32 *indices,RmUint32 maxDepth,RmUint32 minLeafSize,RmReal minAxisSize)
 	{
 		mRaycastFrame = 0;
 		if ( maxDepth < 2 )
@@ -1079,9 +1051,9 @@ public:
 		{
 			maxDepth = 15;
 		}
-		RmUint pow2Table[16] = { 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 65536 };
+		RmUint32 pow2Table[16] = { 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 65536 };
 		mMaxNodeCount = 0;
-		for (RmUint i=0; i<=maxDepth; i++)
+		for (RmUint32 i=0; i<=maxDepth; i++)
 		{
 			mMaxNodeCount+=pow2Table[i];
 		}
@@ -1093,26 +1065,16 @@ public:
 		mVertices = (RmReal *)::malloc(sizeof(RmReal)*3*vcount);
 		memcpy(mVertices,vertices,sizeof(RmReal)*3*vcount);
 		mTcount = tcount;
-		mIndices = (RmUint *)::malloc(sizeof(RmUint)*tcount*3);
-		memcpy(mIndices,indices,sizeof(RmUint)*tcount*3);
+		mIndices = (RmUint32 *)::malloc(sizeof(RmUint32)*tcount*3);
+		memcpy(mIndices,indices,sizeof(RmUint32)*tcount*3);
 
 		mRaycastTriangles = (unsigned char *)::malloc(tcount);
 		memset(mRaycastTriangles,0,tcount);
 
 		mRoot = getNode();
 
-		mPlaneEquations = (RmReal *)::malloc(sizeof(RmReal)*4*mTcount);
-		for (RmUint i=0; i<mTcount; i++)
-		{
-			RmUint i1 = mIndices[i*3+0];
-			RmUint i2 = mIndices[i*3+1];
-			RmUint i3 = mIndices[i*3+2];
-			const RmReal*p1 = &mVertices[i1*3];
-			const RmReal*p2 = &mVertices[i2*3];
-			const RmReal*p3 = &mVertices[i3*3];
-			RmReal *dest = &mPlaneEquations[i*4];
-			dest[3] = computePlane(p3,p2,p1,dest);
-		}
+		mFaceNormals = NULL;
+
 
 
 		new ( mRoot ) NodeAABB(mVcount,mVertices,mTcount,mIndices,maxDepth,minLeafSize,minAxisSize,this);
@@ -1123,7 +1085,7 @@ public:
 		delete []mNodes;
 		::free(mVertices);
 		::free(mIndices);
-		::free(mPlaneEquations);
+		::free(mFaceNormals);
 		::free(mRaycastTriangles);
 	}
 
@@ -1142,14 +1104,14 @@ public:
 		dir[1]*=recipDistance;
 		dir[2]*=recipDistance;
 #if USE_BRUTE_FORCE
-		const RmUint *indices = mIndices;
+		const RmUint32 *indices = mIndices;
 		const RmReal *vertices = mVertices;
 		RmReal nearestDistance = distance;
-		for (RmUint tri=0; tri<mTcount; tri++)
+		for (RmUint32 tri=0; tri<mTcount; tri++)
 		{
-			RmUint i1 = indices[tri*3+0];
-			RmUint i2 = indices[tri*3+1];
-			RmUint i3 = indices[tri*3+2];
+			RmUint32 i1 = indices[tri*3+0];
+			RmUint32 i2 = indices[tri*3+1];
+			RmUint32 i3 = indices[tri*3+2];
 
 			const RmReal *p1 = &vertices[i1*3];
 			const RmReal *p2 = &vertices[i2*3];
@@ -1210,29 +1172,39 @@ public:
 		return ret;
 	}
 
-	virtual void getFaceNormal(RmUint tri,RmReal *faceNormal) const
+	virtual void getFaceNormal(RmUint32 tri,RmReal *faceNormal) 
 	{
-		const RmReal *src = &mPlaneEquations[tri*4];
+		if ( mFaceNormals == NULL )
+		{
+			mFaceNormals = (RmReal *)::malloc(sizeof(RmReal)*3*mTcount);
+			for (RmUint32 i=0; i<mTcount; i++)
+			{
+				RmUint32 i1 = mIndices[i*3+0];
+				RmUint32 i2 = mIndices[i*3+1];
+				RmUint32 i3 = mIndices[i*3+2];
+				const RmReal*p1 = &mVertices[i1*3];
+				const RmReal*p2 = &mVertices[i2*3];
+				const RmReal*p3 = &mVertices[i3*3];
+				RmReal *dest = &mFaceNormals[i*3];
+				computePlane(p3,p2,p1,dest);
+			}
+		}
+		const RmReal *src = &mFaceNormals[tri*3];
 		faceNormal[0] = src[0];
 		faceNormal[1] = src[1];
 		faceNormal[2] = src[2];
 	}
 
-	const RmReal *getPlaneEquation(RmUint tri) const
-	{
-		return &mPlaneEquations[tri*4];
-	}
-
 	unsigned char	mRaycastFrame;
 	unsigned char	*mRaycastTriangles;
-	RmUint			mVcount;
+	RmUint32			mVcount;
 	RmReal			*mVertices;
-	RmReal			*mPlaneEquations;
-	RmUint			mTcount;
-	RmUint			*mIndices;
+	RmReal			*mFaceNormals;
+	RmUint32			mTcount;
+	RmUint32			*mIndices;
 	NodeAABB		*mRoot;
-	RmUint			mNodeCount;
-	RmUint			mMaxNodeCount;
+	RmUint32			mNodeCount;
+	RmUint32			mMaxNodeCount;
 	NodeAABB		*mNodes;
 
 };
@@ -1244,12 +1216,12 @@ public:
 using namespace RAYCAST_MESH;
 
 
-RaycastMesh * createRaycastMesh(RmUint vcount,		// The number of vertices in the source triangle mesh
+RaycastMesh * createRaycastMesh(RmUint32 vcount,		// The number of vertices in the source triangle mesh
 								const RmReal *vertices,		// The array of vertex positions in the format x1,y1,z1..x2,y2,z2.. etc.
-								RmUint tcount,		// The number of triangles in the source triangle mesh
-								const RmUint *indices, // The triangle indices in the format of i1,i2,i3 ... i4,i5,i6, ...
-								RmUint maxDepth,	// Maximum recursion depth for the triangle mesh.
-								RmUint minLeafSize,	// minimum triangles to treat as a 'leaf' node.
+								RmUint32 tcount,		// The number of triangles in the source triangle mesh
+								const RmUint32 *indices, // The triangle indices in the format of i1,i2,i3 ... i4,i5,i6, ...
+								RmUint32 maxDepth,	// Maximum recursion depth for the triangle mesh.
+								RmUint32 minLeafSize,	// minimum triangles to treat as a 'leaf' node.
 								RmReal	minAxisSize	// once a particular axis is less than this size, stop sub-dividing.
 								)
 {
