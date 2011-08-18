@@ -536,35 +536,6 @@ public:
 
 		return ret == 1 ? true : false;
 	}
-	RmUint32 clipTestXYZ(const RmReal *p) const
-	{
-		RmUint32 ocode = 0;
-		if ( p[0] < mMin[0] ) ocode|=OLEFT;
-		if ( p[0] > mMax[0] ) ocode|=ORIGHT;
-
-		if ( p[1] < mMin[1] ) ocode|=OTOP;
-		if ( p[1] > mMax[1] ) ocode|=OBOTTOM;
-
-		if ( p[2] < mMin[2] ) ocode|=OFRONT;
-		if ( p[2] > mMax[2] ) ocode|=OBACK;
-
-		return ocode;
-	};
-
-
-	bool containsLineSegment(const RmReal *p1,const RmReal *p2,RmUint32 &acode) const
-	{
-		acode = 0;
-		RmUint32 ocode1 = clipTestXYZ(p1);
-		if ( !ocode1 ) return true;
-		RmUint32 ocode2 = clipTestXYZ(p2);
-		if ( !ocode2 ) return true;
-		acode = ocode1 & ocode2;
-		if ( acode ) return false;
-		acode = acode;
-		return true;
-	}
-
 	void clamp(const BoundsAABB &aabb)
 	{
 		if ( mMin[0] < aabb.mMin[0] ) mMin[0] = aabb.mMin[0];
@@ -822,19 +793,11 @@ public:
 							unsigned char raycastFrame,
 							const TriVector &leafTriangles)
 		{
-			unsigned acode;
-			if ( !mBounds.containsLineSegment(from,to,acode))
+			RmReal sect[3];
+			RmReal nd = nearestDistance;
+			if ( !intersectLineSegmentAABB(mBounds.mMin,mBounds.mMax,from,dir,nd,sect) )
 			{
-				return;
-			}
-			if ( acode )
-			{
-				RmReal sect[3];
-				RmReal nd = nearestDistance;
-				if ( !intersectLineSegmentAABB(mBounds.mMin,mBounds.mMax,from,dir,nd,sect) )
-				{
-					return;	
-				}
+				return;	
 			}
 
 			if ( mLeafTriangleIndex != TRI_EOF )
