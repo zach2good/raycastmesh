@@ -40,6 +40,123 @@ namespace RAYCAST_MESH
 
 typedef std::vector< RmUint32 > TriVector;
 
+		///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+		/**
+		*	A method to compute a ray-AABB intersection.
+		*	Original code by Andrew Woo, from "Graphics Gems", Academic Press, 1990
+		*	Optimized code by Pierre Terdiman, 2000 (~20-30% faster on my Celeron 500)
+		*	Epsilon value added by Klaus Hartmann. (discarding it saves a few cycles only)
+		*
+		*	Hence this version is faster as well as more robust than the original one.
+		*
+		*	Should work provided:
+		*	1) the integer representation of 0.0f is 0x00000000
+		*	2) the sign bit of the RmReal is the most significant one
+		*
+		*	Report bugs: p.terdiman@codercorner.com
+		*
+		*	\param		aabb		[in] the axis-aligned bounding box
+		*	\param		origin		[in] ray origin
+		*	\param		dir			[in] ray direction
+		*	\param		coord		[out] impact coordinates
+		*	\return		true if ray intersects AABB
+		*/
+		///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+		#define RAYAABB_EPSILON 0.00001f
+		//! Integer representation of a RmRealing-point value.
+		#define IR(x)	((RmUint32&)x)
+
+		bool intersectRayAABB(const RmReal MinB[3],const RmReal MaxB[3],const RmReal origin[3],const RmReal dir[3],RmReal coord[3])
+		{
+			bool Inside = true;
+			RmReal MaxT[3];
+			MaxT[0]=MaxT[1]=MaxT[2]=-1.0f;
+
+			// Find candidate planes.
+			for(RmUint32 i=0;i<3;i++)
+			{
+				if(origin[i] < MinB[i])
+				{
+					coord[i]	= MinB[i];
+					Inside		= false;
+
+					// Calculate T distances to candidate planes
+					if(IR(dir[i]))	MaxT[i] = (MinB[i] - origin[i]) / dir[i];
+				}
+				else if(origin[i] > MaxB[i])
+				{
+					coord[i]	= MaxB[i];
+					Inside		= false;
+
+					// Calculate T distances to candidate planes
+					if(IR(dir[i]))	MaxT[i] = (MaxB[i] - origin[i]) / dir[i];
+				}
+			}
+
+			// Ray origin inside bounding box
+			if(Inside)
+			{
+				coord[0] = origin[0];
+				coord[1] = origin[1];
+				coord[2] = origin[2];
+				return true;
+			}
+
+			// Get largest of the maxT's for final choice of intersection
+			RmUint32 WhichPlane = 0;
+			if(MaxT[1] > MaxT[WhichPlane])	WhichPlane = 1;
+			if(MaxT[2] > MaxT[WhichPlane])	WhichPlane = 2;
+
+			// Check final candidate actually inside box
+			if(IR(MaxT[WhichPlane])&0x80000000) return false;
+
+			for(RmUint32 i=0;i<3;i++)
+			{
+				if(i!=WhichPlane)
+				{
+					coord[i] = origin[i] + MaxT[WhichPlane] * dir[i];
+					#ifdef RAYAABB_EPSILON
+					if(coord[i] < MinB[i] - RAYAABB_EPSILON || coord[i] > MaxB[i] + RAYAABB_EPSILON)	return false;
+					#else
+					if(coord[i] < MinB[i] || coord[i] > MaxB[i])	return false;
+					#endif
+				}
+			}
+			return true;	// ray hits box
+		}
+
+
+
+
+		bool intersectLineSegmentAABB(const RmReal bmin[3],const RmReal bmax[3],const RmReal p1[3],const RmReal dir[3],RmReal &dist,RmReal intersect[3])
+		{
+			bool ret = false;
+
+			if ( dist > RAYAABB_EPSILON )
+			{
+				ret = intersectRayAABB(bmin,bmax,p1,dir,intersect);
+				if ( ret )
+				{
+					RmReal dx = p1[0]-intersect[0];
+					RmReal dy = p1[1]-intersect[1];
+					RmReal dz = p1[2]-intersect[2];
+					RmReal d = dx*dx+dy*dy+dz*dz;
+					if ( d < dist*dist )
+					{
+						dist = sqrtf(d);
+					}
+					else
+					{
+						ret = false;
+					}
+				}
+			}
+			return ret;
+		}
+
+
+
+
 /* a = b - c */
 #define vector(a,b,c) \
 	(a)[0] = (b)[0] - (c)[0];	\
@@ -133,381 +250,190 @@ static RmReal computePlane(const RmReal *A,const RmReal *B,const RmReal *C,RmRea
 }
 
 
-#define MAX_CLIP 64
+/********************************************************/
+/* AABB-triangle overlap test code                      */
+/* by Tomas Akenine-Möller                              */
+/* Function: int triBoxOverlap(RmReal boxcenter[3],      */
+/*          RmReal boxhalfsize[3],RmReal triverts[3][3]); */
+/* History:                                             */
+/*   2001-03-05: released the code in its first version */
+/*   2001-06-18: changed the order of the tests, faster */
+/*                                                      */
+/* Acknowledgement: Many thanks to Pierre Terdiman for  */
+/* suggestions and discussions on how to optimize code. */
+/* Thanks to David Hunt for finding a ">="-bug!         */
+/********************************************************/
+#include <math.h>
+#include <stdio.h>
 
-// This is a general purpose CohenSutherland polygon clipper written in
-// C++ and using STL.  This clipper is not inherently slow, but then again
-// it is not necessarily blazingly fast.  It uses STL vectors to build
-// the clipped polygon and return the result.
-//
-// This routine is presented to educate clearly the cohen sutherland
-// clipping algorithm.  It clips against an arbitrary
-// 3d axis aligned bounding region which you specify.
-//
-// It is fairly straightforward to change the Vector3d class to some
-// other vertex format and easily use this routine to clip any kind
-// of vertex data with any number of interpolants.
-//
-// This was written by John W. Ratcliff (jratcliff@verant.com) on
-// August 10, 2000 and is relased into the public domain as part of
-// the Code Snippet library on FlipCode.com
+#define X 0
+#define Y 1
+#define Z 2
 
-class Vec3d
+#define CROSS(dest,v1,v2) \
+	dest[0]=v1[1]*v2[2]-v1[2]*v2[1]; \
+	dest[1]=v1[2]*v2[0]-v1[0]*v2[2]; \
+	dest[2]=v1[0]*v2[1]-v1[1]*v2[0];
+
+#define DOT(v1,v2) (v1[0]*v2[0]+v1[1]*v2[1]+v1[2]*v2[2])
+
+#define SUB(dest,v1,v2) \
+	dest[0]=v1[0]-v2[0]; \
+	dest[1]=v1[1]-v2[1]; \
+	dest[2]=v1[2]-v2[2];
+
+#define FINDMINMAX(x0,x1,x2,min,max) \
+	min = max = x0;   \
+	if(x1<min) min=x1;\
+	if(x1>max) max=x1;\
+	if(x2<min) min=x2;\
+	if(x2>max) max=x2;
+
+int planeBoxOverlap(RmReal normal[3],RmReal d, RmReal maxbox[3])
 {
-public:
-	Vec3d(void) { };
-	Vec3d(const RmReal *p) { x = p[0]; y = p[1]; z = p[2]; };
-	Vec3d(RmReal _x,RmReal _y,RmReal _z) { x = _x; y = _y; z = _z; };
-
-	void set(RmReal _x,RmReal _y,RmReal _z) { x = _x; y = _y; z = _z; };
-	void set(const RmReal *p) { x = p[0]; y = p[1]; z = p[2]; };
-
-
-	RmReal x;
-	RmReal y;
-	RmReal z;
-};
-
-
-
-// Enumeration defining the 6 planes of the view frustum.
-enum ClipPlane
-{
-	CP_TOP = 0,
-	CP_BOTTOM,
-	CP_LEFT,
-	CP_RIGHT,
-	CP_NEAR,
-	CP_FAR,
-	CP_LAST
-};
-
-enum ClipResult
-{
-	CR_INSIDE, // completely inside the frustum.
-	CR_OUTSIDE, //completely outside the frustum.
-	CR_PARTIAL, // was clipped.
-	CR_LAST
-};
-
-// An intermediate vertex format which contains the cohen sutherland
-// clipping codes.
-class ClipVertex
-{
-public:
-	ClipVertex(void) { };
-
-	ClipVertex(const Vec3d &pos,int code)
+	int q;
+	RmReal vmin[3],vmax[3];
+	for(q=X;q<=Z;q++)
 	{
-		mPos = pos;
-		mClipCode = code;
-	};
-
-
-	// clip vertex between v1 and v2 on this plane..
-	ClipVertex(const ClipVertex &v1,
-		const ClipVertex &v2,
-		ClipPlane p,
-		RmReal edge); // the clipping boundary..
-
-
-	void Set(const Vec3d &pos,int code)
-	{
-		mPos = pos;
-		mClipCode = code;
-	};
-
-	const Vec3d& GetPos(void) const { return mPos; };
-
-
-	int GetClipCode(void) const { return mClipCode; };
-	void SetClipCode(int code) { mClipCode = code; };
-
-	RmReal GetX(void) const { return mPos.x; };
-	RmReal GetY(void) const { return mPos.y; };
-	RmReal GetZ(void) const { return mPos.z; };
-
-	int             mClipCode;
-	Vec3d mPos;
-};
-
-
-class FrustumClipper
-{
-public:
-
-	FrustumClipper(const RmReal *fmin,const RmReal *fmax)
-	{
-		SetFrustum(fmin,fmax);
-	};
-
-	FrustumClipper(void)
-	{
-		Vec3d minbound(-0.5f,-0.5f,-0.5f);
-		Vec3d maxbound(+0.5f,+0.5f,+0.5f);
-		SetFrustum(&minbound.x,&maxbound.x);
-	};
-
-	void SetFrustum(const RmReal *fmin,const RmReal *fmax)
-	{
-		mEdges[CP_LEFT]   = fmin[0];
-		mEdges[CP_RIGHT]  = fmax[0];
-		mEdges[CP_TOP]    = fmin[1];
-		mEdges[CP_BOTTOM] = fmax[1];
-		mEdges[CP_NEAR]   = fmin[2];
-		mEdges[CP_FAR]    = fmax[2];
-	};
-
-	// compute the cohen sutherland clipping bits for this 3d position
-	// against the view frustum.
-	inline int ClipCode(const Vec3d &pos) const;
-
-	// compute the cohen sutherland clipping codes, and *also* accumulate
-	// the or bits and the and bits for a series of point tests.
-	inline int ClipCode(const Vec3d &pos,int &ocode,int &acode) const;
-
-	// clips input polygon against the frustum.  Places output polygon
-	// in 'output'.
-	inline ClipResult Clip(const Vec3d *input, // input vertices.
-		RmUint32           vcount,   // input vertex count.
-		Vec3d       *output,
-		RmUint32          &ocount) const;
-
-	inline ClipResult ClipRay(const Vec3d &r1a,
-		const Vec3d &r2a,
-		Vec3d &r1b,
-		Vec3d &r2b);
-
-private:
-	RmReal mEdges[CP_LAST]; // define the clipping planes of the view frustum
-
-};
-
-int FrustumClipper::ClipCode(const Vec3d &pos) const
-{
-	int code = 0;
-
-	// build cohen sutherland clip codes.
-	if ( pos.x < mEdges[CP_LEFT]   ) code|=(1<<CP_LEFT);
-	if ( pos.x > mEdges[CP_RIGHT]  ) code|=(1<<CP_RIGHT);
-	if ( pos.y < mEdges[CP_TOP]    ) code|=(1<<CP_TOP);
-	if ( pos.y > mEdges[CP_BOTTOM] ) code|=(1<<CP_BOTTOM);
-	if ( pos.z < mEdges[CP_NEAR]   ) code|=(1<<CP_NEAR);
-	if ( pos.z > mEdges[CP_FAR]    ) code|=(1<<CP_FAR);
-
-	return code;
-}
-
-int FrustumClipper::ClipCode(const Vec3d &pos,int &ocode,int &acode) const
-{
-	int code = ClipCode(pos);
-
-	ocode|=code; // build or mask
-	acode&=code; // build and mask
-
-	return code;
-}
-
-
-ClipResult FrustumClipper::Clip(const Vec3d *polygon,RmUint32 in_count,Vec3d *dest,RmUint32 &ocount) const
-{
-
-	ocount    = 0;
-	int ocode = 0;
-	int acode = 0xFFFF;
-
-	ClipVertex	list1[MAX_CLIP];
-	ClipVertex  list2[MAX_CLIP];
-
-	ClipVertex *input  = list1;
-	ClipVertex *output = list2;
-
-	for (RmUint32 i=0; i<in_count; i++)
-	{
-		input[i].Set( polygon[i], ClipCode(polygon[i], ocode, acode) );
-	}
-
-	if ( acode ) return CR_OUTSIDE; // points lie completely outside the frustum, no intersection of any kind
-
-	if ( !ocode )
-	{
-		dest[0] = polygon[0];
-		dest[1] = polygon[1];
-		dest[1] = polygon[2];
-		ocount = 3;
-		return CR_INSIDE; // completely inside!
-	}
-
-	// ok..need to clip it!!
-
-	RmUint32 l;
-	l = CP_LAST;
-
-	for (RmUint32 i=0; i<l; i++)
-	{
-		RmUint32 mask = (1<<i); // this is the clip mask.
-		if ( ocode & mask ) // if any vertices are clipped against this plane
+		if(normal[q]>0.0f)
 		{
-			ocount    = 0;
-			int new_ocode = 0;
-			int new_acode = 0xFFFF;
-			for (RmUint32 j=0; j<in_count; j++)
-			{
-				RmUint32 k = j+1;
-				if ( k == in_count ) k = 0;
-				ClipVertex &v1 = input[j];
-				ClipVertex &v2 = input[k];
-				// if this vertice is coming into or exiting out from this plane
-				if ( (v1.GetClipCode() ^ v2.GetClipCode() ) & mask )
-				{
-					ClipVertex v0(v1,v2,(ClipPlane)i,mEdges[i]);
-					int code = ClipCode(v0.GetPos(),new_ocode,new_acode);
-					v0.SetClipCode(code);
-					output[ocount] = v0;
-					ocount++;
-				}
-				if ( ! (v2.GetClipCode() & mask ) )
-				{
-					output[ocount] = v2;
-					ocount++;
-					new_acode&=v2.GetClipCode();
-				}
-			}
-
-			// Result of clipping produced no valid polygon *or* clipped result
-			// is completely outside the frustum.
-			if ( ocount < 3 || new_acode )
-			{
-				ocount = 0;
-				return CR_OUTSIDE;
-			}
-
-			ClipVertex *temp = input;
-			input = output;
-			output = temp;
-			in_count = ocount;
+			vmin[q]=-maxbox[q];
+			vmax[q]=maxbox[q];
+		}
+		else
+		{
+			vmin[q]=maxbox[q];
+			vmax[q]=-maxbox[q];
 		}
 	}
+	if(DOT(normal,vmin)+d>0.0f) return 0;
+	if(DOT(normal,vmax)+d>=0.0f) return 1;
 
-	for (RmUint32 i=0; i<in_count; i++)
-	{
-		dest[i] = input[i].mPos;
-	}
-
-	ocount = in_count;
-
-	return CR_PARTIAL;
+	return 0;
 }
 
 
-// clip vertex between v1 and v2 on this plane..
-ClipVertex::ClipVertex(const ClipVertex &v1,
-					   const ClipVertex &v2,
-					   ClipPlane p,
-					   RmReal edge)  // the clipping boundary..
+/*======================== X-tests ========================*/
+#define AXISTEST_X01(a, b, fa, fb)             \
+	p0 = a*v0[Y] - b*v0[Z];                    \
+	p2 = a*v2[Y] - b*v2[Z];                    \
+	if(p0<p2) {min=p0; max=p2;} else {min=p2; max=p0;} \
+	rad = fa * boxhalfsize[Y] + fb * boxhalfsize[Z];   \
+	if(min>rad || max<-rad) return 0;
+
+#define AXISTEST_X2(a, b, fa, fb)              \
+	p0 = a*v0[Y] - b*v0[Z];                    \
+	p1 = a*v1[Y] - b*v1[Z];                    \
+	if(p0<p1) {min=p0; max=p1;} else {min=p1; max=p0;} \
+	rad = fa * boxhalfsize[Y] + fb * boxhalfsize[Z];   \
+	if(min>rad || max<-rad) return 0;
+
+/*======================== Y-tests ========================*/
+#define AXISTEST_Y02(a, b, fa, fb)             \
+	p0 = -a*v0[X] + b*v0[Z];                   \
+	p2 = -a*v2[X] + b*v2[Z];                       \
+	if(p0<p2) {min=p0; max=p2;} else {min=p2; max=p0;} \
+	rad = fa * boxhalfsize[X] + fb * boxhalfsize[Z];   \
+	if(min>rad || max<-rad) return 0;
+
+#define AXISTEST_Y1(a, b, fa, fb)              \
+	p0 = -a*v0[X] + b*v0[Z];                   \
+	p1 = -a*v1[X] + b*v1[Z];                       \
+	if(p0<p1) {min=p0; max=p1;} else {min=p1; max=p0;} \
+	rad = fa * boxhalfsize[X] + fb * boxhalfsize[Z];   \
+	if(min>rad || max<-rad) return 0;
+
+/*======================== Z-tests ========================*/
+
+#define AXISTEST_Z12(a, b, fa, fb)             \
+	p1 = a*v1[X] - b*v1[Y];                    \
+	p2 = a*v2[X] - b*v2[Y];                    \
+	if(p2<p1) {min=p2; max=p1;} else {min=p1; max=p2;} \
+	rad = fa * boxhalfsize[X] + fb * boxhalfsize[Y];   \
+	if(min>rad || max<-rad) return 0;
+
+#define AXISTEST_Z0(a, b, fa, fb)              \
+	p0 = a*v0[X] - b*v0[Y];                \
+	p1 = a*v1[X] - b*v1[Y];                    \
+	if(p0<p1) {min=p0; max=p1;} else {min=p1; max=p0;} \
+	rad = fa * boxhalfsize[X] + fb * boxhalfsize[Y];   \
+	if(min>rad || max<-rad) return 0;
+
+int triBoxOverlap(RmReal boxcenter[3],RmReal boxhalfsize[3],RmReal triverts[3][3])
 {
-	RmReal slope;
 
-	switch ( p )
-	{
-	case CP_LEFT:
-	case CP_RIGHT:
-		slope   = (edge - v1.GetX() ) / (v2.GetX() - v1.GetX() );
-		mPos.x = edge;
-		mPos.y = v1.GetY() + ((v2.GetY() - v1.GetY()) * slope);
-		mPos.z = v1.GetZ() + ((v2.GetZ() - v1.GetZ()) * slope);
-		break;
-	case CP_TOP:
-	case CP_BOTTOM:
-		slope   = (edge - v1.GetY() ) / (v2.GetY() - v1.GetY() );
-		mPos.y = edge;
-		mPos.x = v1.GetX() + ((v2.GetX() - v1.GetX()) * slope);
-		mPos.z = v1.GetZ() + ((v2.GetZ() - v1.GetZ()) * slope);
-		break;
-	case CP_NEAR:
-	case CP_FAR:
-		slope   = (edge - v1.GetZ() ) / (v2.GetZ() - v1.GetZ() );
-		mPos.z = edge;
-		mPos.x = v1.GetX() + ((v2.GetX() - v1.GetX()) * slope);
-		mPos.y = v1.GetY() + ((v2.GetY() - v1.GetY()) * slope);
-		break;
-	case CP_LAST:
-	default:
-		// Do nothing.
-		break;
-	}
+	/*    use separating axis theorem to test overlap between triangle and box */
+	/*    need to test for overlap in these directions: */
+	/*    1) the {x,y,z}-directions (actually, since we use the AABB of the triangle */
+	/*       we do not even need to test these) */
+	/*    2) normal of the triangle */
+	/*    3) crossproduct(edge from tri, {x,y,z}-directin) */
+	/*       this gives 3x3=9 more tests */
+	RmReal v0[3],v1[3],v2[3];
+	RmReal min,max,d,p0,p1,p2,rad,fex,fey,fez;
+	RmReal normal[3],e0[3],e1[3],e2[3];
+
+	/* This is the fastest branch on Sun */
+	/* move everything so that the boxcenter is in (0,0,0) */
+	SUB(v0,triverts[0],boxcenter);
+	SUB(v1,triverts[1],boxcenter);
+	SUB(v2,triverts[2],boxcenter);
+
+	/* compute triangle edges */
+	SUB(e0,v1,v0);      /* tri edge 0 */
+	SUB(e1,v2,v1);      /* tri edge 1 */
+	SUB(e2,v0,v2);      /* tri edge 2 */
+
+	/* Bullet 3:  */
+	/*  test the 9 tests first (this was faster) */
+	fex = fabs(e0[X]);
+	fey = fabs(e0[Y]);
+	fez = fabs(e0[Z]);
+	AXISTEST_X01(e0[Z], e0[Y], fez, fey);
+	AXISTEST_Y02(e0[Z], e0[X], fez, fex);
+	AXISTEST_Z12(e0[Y], e0[X], fey, fex);
+
+	fex = fabs(e1[X]);
+	fey = fabs(e1[Y]);
+	fez = fabs(e1[Z]);
+	AXISTEST_X01(e1[Z], e1[Y], fez, fey);
+	AXISTEST_Y02(e1[Z], e1[X], fez, fex);
+	AXISTEST_Z0(e1[Y], e1[X], fey, fex);
+
+	fex = fabs(e2[X]);
+	fey = fabs(e2[Y]);
+	fez = fabs(e2[Z]);
+	AXISTEST_X2(e2[Z], e2[Y], fez, fey);
+	AXISTEST_Y1(e2[Z], e2[X], fez, fex);
+	AXISTEST_Z12(e2[Y], e2[X], fey, fex);
+
+	/* Bullet 1: */
+	/*  first test overlap in the {x,y,z}-directions */
+	/*  find min, max of the triangle each direction, and test for overlap in */
+	/*  that direction -- this is equivalent to testing a minimal AABB around */
+	/*  the triangle against the AABB */
+
+	/* test in X-direction */
+	FINDMINMAX(v0[X],v1[X],v2[X],min,max);
+	if(min>boxhalfsize[X] || max<-boxhalfsize[X]) return 0;
+
+	/* test in Y-direction */
+	FINDMINMAX(v0[Y],v1[Y],v2[Y],min,max);
+	if(min>boxhalfsize[Y] || max<-boxhalfsize[Y]) return 0;
+
+	/* test in Z-direction */
+	FINDMINMAX(v0[Z],v1[Z],v2[Z],min,max);
+	if(min>boxhalfsize[Z] || max<-boxhalfsize[Z]) return 0;
+
+	/* Bullet 2: */
+	/*  test if the box intersects the plane of the triangle */
+	/*  compute plane equation of triangle: normal*x+d=0 */
+	CROSS(normal,e0,e1);
+	d=-DOT(normal,v0);  /* plane eq: normal.x+d=0 */
+	if(!planeBoxOverlap(normal,d,boxhalfsize)) return 0;
+
+	return 1;   /* box and triangle overlaps */
 }
-
-
-ClipResult FrustumClipper::ClipRay(const Vec3d &r1a,
-								   const Vec3d &r2a,
-								   Vec3d &r1b,
-								   Vec3d &r2b)
-{
-	int ocode = 0;
-	int acode = 0xFFFF;
-
-	ClipVertex ray1( r1a, ClipCode( r1a, ocode, acode ) );
-	ClipVertex ray2( r2a, ClipCode( r2a, ocode, acode ) );
-
-	if ( acode ) return CR_OUTSIDE; // points lie completely outside the frustum, no intersection of any kind
-
-	if ( !ocode )
-	{
-		r1b = r1a;
-		r2b = r2a;
-		return CR_INSIDE; // completely inside!
-	}
-
-
-	int l;
-	l = CP_LAST;
-
-	for (int i=0; i<l; i++)
-	{
-
-		int mask = (1<<i); // this is the clip mask.
-
-		if ( ocode & mask ) // if any vertices are clipped against this plane
-		{
-			// if this RAY is coming into or exiting out from this plane
-			int new_acode = 0xFFFF;
-			int new_ocode = 0;
-
-			if ( (ray1.GetClipCode() ^ ray2.GetClipCode() ) & mask )
-			{
-
-				ClipVertex v0(ray1,ray2,(ClipPlane)i,mEdges[i]);
-				int code = ClipCode(v0.GetPos(),new_ocode,new_acode);
-				v0.SetClipCode(code);
-
-				if ( ray1.GetClipCode() & mask )
-				{
-					ray1 = v0;
-					new_acode&=ray2.GetClipCode();
-				}
-				else
-				{
-					ray2 = v0;
-					new_acode&=ray1.GetClipCode();
-				}
-
-				if ( new_acode ) return CR_OUTSIDE;
-
-			}
-		}
-	}
-
-
-	r1b = ray1.GetPos();
-	r2b = ray2.GetPos();
-
-	return CR_PARTIAL;
-
-
-}
-
-
 
 #define TRI_EOF 0xFFFFFFFF
 
@@ -520,13 +446,14 @@ enum AxisAABB
 
 enum ClipCode
 {
-	OLEFT	=	(1<<0),
-	ORIGHT  =	(1<<1),
-	OTOP	=	(1<<2),
-	OBOTTOM	=	(1<<3),
-	OFRONT	=	(1<<4),
-	OBACK	=	(1<<5),
+	OLEFT   =       (1<<0),
+	ORIGHT  =       (1<<1),
+	OTOP    =       (1<<2),
+	OBOTTOM =       (1<<3),
+	OFRONT  =       (1<<4),
+	OBACK   =       (1<<5),
 };
+
 
 class BoundsAABB
 {
@@ -561,22 +488,6 @@ public:
 		mMax[2] = z;
 	}
 
-	RmUint32 clipTestXYZ(const RmReal *p) const
-	{
-		RmUint32 ocode = 0;
-		if ( p[0] < mMin[0] ) ocode|=OLEFT;
-		if ( p[0] > mMax[0] ) ocode|=ORIGHT;
-
-		if ( p[1] < mMin[1] ) ocode|=OTOP;
-		if ( p[1] > mMax[1] ) ocode|=OBOTTOM;
-
-		if ( p[2] < mMin[2] ) ocode|=OFRONT;
-		if ( p[2] > mMax[2] ) ocode|=OBACK;
-
-		return ocode;
-	};
-
-
 	void include(const RmReal *v)
 	{
 		if ( v[0] < mMin[0] ) mMin[0] = v[0];
@@ -597,25 +508,52 @@ public:
 
 	bool containsTriangle(const RmReal *p1,const RmReal *p2,const RmReal *p3) const
 	{
-		FrustumClipper clipper;
-		clipper.SetFrustum(mMin,mMax);
-		Vec3d verts[3];
-		Vec3d outVerts[MAX_CLIP];
+		RmReal boxCenter[3];
+		RmReal	boxHalfSize[3];
+		RmReal triVerts[3][3];
 
-		verts[0] = Vec3d(p1);
-		verts[1] = Vec3d(p2);
-		verts[2] = Vec3d(p3);
+		boxCenter[0] = (mMin[0]+mMax[0])*0.5f;
+		boxCenter[1] = (mMin[1]+mMax[1])*0.5f;
+		boxCenter[2] = (mMin[2]+mMax[2])*0.5f;
 
-		RmUint32 ocount;
-		ClipResult result = clipper.Clip(verts,3,outVerts,ocount);
-		return result != CR_OUTSIDE;
+		boxHalfSize[0] = (mMax[0]-mMin[0])*0.5f;
+		boxHalfSize[1] = (mMax[1]-mMin[1])*0.5f;
+		boxHalfSize[2] = (mMax[2]-mMin[2])*0.5f;
+
+		triVerts[0][0] = p1[0];
+		triVerts[0][1] = p1[1];
+		triVerts[0][2] = p1[2];
+
+		triVerts[1][0] = p2[0];
+		triVerts[1][1] = p2[1];
+		triVerts[1][2] = p2[2];
+
+		triVerts[2][0] = p3[0];
+		triVerts[2][1] = p3[1];
+		triVerts[2][2] = p3[2];
+
+		int ret = triBoxOverlap(boxCenter,boxHalfSize,triVerts);
+
+		return ret == 1 ? true : false;
 	}
+	RmUint32 clipTestXYZ(const RmReal *p) const
+	{
+		RmUint32 ocode = 0;
+		if ( p[0] < mMin[0] ) ocode|=OLEFT;
+		if ( p[0] > mMax[0] ) ocode|=ORIGHT;
+
+		if ( p[1] < mMin[1] ) ocode|=OTOP;
+		if ( p[1] > mMax[1] ) ocode|=OBOTTOM;
+
+		if ( p[2] < mMin[2] ) ocode|=OFRONT;
+		if ( p[2] > mMax[2] ) ocode|=OBACK;
+
+		return ocode;
+	};
 
 
 	bool containsLineSegment(const RmReal *p1,const RmReal *p2,RmUint32 &acode) const
 	{
-		FrustumClipper clipper;
-		clipper.SetFrustum(mMin,mMax);
 		acode = 0;
 		RmUint32 ocode1 = clipTestXYZ(p1);
 		if ( !ocode1 ) return true;
@@ -868,121 +806,6 @@ public:
 			}
 		}
 
-		///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-		/**
-		*	A method to compute a ray-AABB intersection.
-		*	Original code by Andrew Woo, from "Graphics Gems", Academic Press, 1990
-		*	Optimized code by Pierre Terdiman, 2000 (~20-30% faster on my Celeron 500)
-		*	Epsilon value added by Klaus Hartmann. (discarding it saves a few cycles only)
-		*
-		*	Hence this version is faster as well as more robust than the original one.
-		*
-		*	Should work provided:
-		*	1) the integer representation of 0.0f is 0x00000000
-		*	2) the sign bit of the RmReal is the most significant one
-		*
-		*	Report bugs: p.terdiman@codercorner.com
-		*
-		*	\param		aabb		[in] the axis-aligned bounding box
-		*	\param		origin		[in] ray origin
-		*	\param		dir			[in] ray direction
-		*	\param		coord		[out] impact coordinates
-		*	\return		true if ray intersects AABB
-		*/
-		///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-		#define RAYAABB_EPSILON 0.00001f
-		//! Integer representation of a RmRealing-point value.
-		#define IR(x)	((RmUint32&)x)
-
-		bool intersectRayAABB(const RmReal MinB[3],const RmReal MaxB[3],const RmReal origin[3],const RmReal dir[3],RmReal coord[3])
-		{
-			bool Inside = true;
-			RmReal MaxT[3];
-			MaxT[0]=MaxT[1]=MaxT[2]=-1.0f;
-
-			// Find candidate planes.
-			for(RmUint32 i=0;i<3;i++)
-			{
-				if(origin[i] < MinB[i])
-				{
-					coord[i]	= MinB[i];
-					Inside		= false;
-
-					// Calculate T distances to candidate planes
-					if(IR(dir[i]))	MaxT[i] = (MinB[i] - origin[i]) / dir[i];
-				}
-				else if(origin[i] > MaxB[i])
-				{
-					coord[i]	= MaxB[i];
-					Inside		= false;
-
-					// Calculate T distances to candidate planes
-					if(IR(dir[i]))	MaxT[i] = (MaxB[i] - origin[i]) / dir[i];
-				}
-			}
-
-			// Ray origin inside bounding box
-			if(Inside)
-			{
-				coord[0] = origin[0];
-				coord[1] = origin[1];
-				coord[2] = origin[2];
-				return true;
-			}
-
-			// Get largest of the maxT's for final choice of intersection
-			RmUint32 WhichPlane = 0;
-			if(MaxT[1] > MaxT[WhichPlane])	WhichPlane = 1;
-			if(MaxT[2] > MaxT[WhichPlane])	WhichPlane = 2;
-
-			// Check final candidate actually inside box
-			if(IR(MaxT[WhichPlane])&0x80000000) return false;
-
-			for(RmUint32 i=0;i<3;i++)
-			{
-				if(i!=WhichPlane)
-				{
-					coord[i] = origin[i] + MaxT[WhichPlane] * dir[i];
-					#ifdef RAYAABB_EPSILON
-					if(coord[i] < MinB[i] - RAYAABB_EPSILON || coord[i] > MaxB[i] + RAYAABB_EPSILON)	return false;
-					#else
-					if(coord[i] < MinB[i] || coord[i] > MaxB[i])	return false;
-					#endif
-				}
-			}
-			return true;	// ray hits box
-		}
-
-
-
-
-		bool intersectLineSegmentAABB(const RmReal bmin[3],const RmReal bmax[3],const RmReal p1[3],const RmReal dir[3],RmReal &dist,RmReal intersect[3])
-		{
-			bool ret = false;
-
-			if ( dist > RAYAABB_EPSILON )
-			{
-				ret = intersectRayAABB(bmin,bmax,p1,dir,intersect);
-				if ( ret )
-				{
-					RmReal dx = p1[0]-intersect[0];
-					RmReal dy = p1[1]-intersect[1];
-					RmReal dz = p1[2]-intersect[2];
-					RmReal d = dx*dx+dy*dy+dz*dz;
-					if ( d < dist*dist )
-					{
-						dist = sqrtf(d);
-					}
-					else
-					{
-						ret = false;
-					}
-				}
-			}
-			return ret;
-		}
-
-
 
 		virtual void raycast(bool &hit,
 							const RmReal *from,
@@ -1004,7 +827,6 @@ public:
 			{
 				return;
 			}
-
 			if ( acode )
 			{
 				RmReal sect[3];
