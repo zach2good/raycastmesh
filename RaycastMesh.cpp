@@ -3,6 +3,34 @@
 #include <assert.h>
 #include <vector>
 
+// This code snippet allows you to create an axis aligned bounding volume tree for a triangle mesh so that you can do
+// high-speed raycasting.
+//
+// There are much better implementations of this available on the internet.  In particular I recommend that you use 
+// OPCODE written by Pierre Terdiman.
+// @see: http://www.codercorner.com/Opcode.htm
+//
+// OPCODE does a whole lot more than just raycasting, and is a rather significant amount of source code.
+//
+// I am providing this code snippet for the use case where you *only* want to do quick and dirty optimized raycasting.
+// I have not done performance testing between this version and OPCODE; so I don't know how much slower it is.  However,
+// anytime you switch to using a spatial data structure for raycasting, you increase your performance by orders and orders 
+// of magnitude; so this implementation should work fine for simple tools and utilities.
+//
+// It also serves as a nice sample for people who are trying to learn the algorithm of how to implement AABB trees.
+// AABB = Axis Aligned Bounding Volume trees.
+//
+// http://www.cgal.org/Manual/3.5/doc_html/cgal_manual/AABB_tree/Chapter_main.html
+//
+//
+// This code snippet was written by John W. Ratcliff on August 18, 2011 and released under the MIT. license.
+//
+// mailto:jratcliffscarab@gmail.com
+//
+// The official source can be found at:  http://code.google.com/p/raycastmesh/
+//
+// 
+
 #pragma warning(disable:4100)
 
 #define USE_BRUTE_FORCE 0
@@ -636,19 +664,20 @@ public:
 		{
 			mLeft = NULL;
 			mRight = NULL;
-			mTriIndices= NULL;
+			mLeafTriangleIndex= TRI_EOF;
 		}
 
 		NodeAABB(RmUint32 vcount,const RmReal *vertices,RmUint32 tcount,RmUint32 *indices,
 			RmUint32 maxDepth,	// Maximum recursion depth for the triangle mesh.
 			RmUint32 minLeafSize,	// minimum triangles to treat as a 'leaf' node.
 			RmReal	minAxisSize,
-			NodeInterface *callback)	// once a particular axis is less than this size, stop sub-dividing.
+			NodeInterface *callback,
+			TriVector &leafTriangles)	// once a particular axis is less than this size, stop sub-dividing.
 
 		{
 			mLeft = NULL;
 			mRight = NULL;
-			mTriIndices = NULL;
+			mLeafTriangleIndex = TRI_EOF;
 			TriVector triangles;
 			triangles.reserve(tcount);
 			for (RmUint32 i=0; i<tcount; i++)
@@ -663,7 +692,7 @@ public:
 				mBounds.include( vtx );
 				vtx+=3;
 			}
-			split(triangles,vcount,vertices,tcount,indices,0,maxDepth,minLeafSize,minAxisSize,callback);
+			split(triangles,vcount,vertices,tcount,indices,0,maxDepth,minLeafSize,minAxisSize,callback,leafTriangles);
 		}
 
 		NodeAABB(const BoundsAABB &aabb)
@@ -671,15 +700,11 @@ public:
 			mBounds = aabb;
 			mLeft = NULL;
 			mRight = NULL;
-			mTriIndices = NULL;
+			mLeafTriangleIndex = TRI_EOF;
 		}
 
 		~NodeAABB(void)
 		{
-			if ( mTriIndices )
-			{
-				::free(mTriIndices);
-			}
 		}
 
 		// here is where we split the mesh..
@@ -692,10 +717,11 @@ public:
 			RmUint32 maxDepth,	// Maximum recursion depth for the triangle mesh.
 			RmUint32 minLeafSize,	// minimum triangles to treat as a 'leaf' node.
 			RmReal	minAxisSize,
-			NodeInterface *callback)	// once a particular axis is less than this size, stop sub-dividing.
+			NodeInterface *callback,
+			TriVector &leafTriangles)	// once a particular axis is less than this size, stop sub-dividing.
 
 		{
-			// Find the longest axis
+			// Find the longest axis of the bounding volume of this node
 			RmReal dx = mBounds.mMax[0] - mBounds.mMin[0];
 			RmReal dy = mBounds.mMax[1] - mBounds.mMin[1];
 			RmReal dz = mBounds.mMax[2] - mBounds.mMin[2];
@@ -715,11 +741,19 @@ public:
 
 			RmUint32 count = triangles.size();
 
+			// if the number of triangles is less than the minimum allowed for a leaf node or...
+			// we have reached the maximum recursion depth or..
+			// the width of the longest axis is less than the minimum axis size then...
+			// we create the leaf node and copy the triangles into the leaf node triangle array.
 			if ( count < minLeafSize || depth >= maxDepth || laxis < minAxisSize )
 			{ 
-				mTriIndices = (RmUint32 *)::malloc(sizeof(RmUint32)*(count+1));
-				memcpy(mTriIndices,&triangles[0],count*sizeof(RmUint32));
-				mTriIndices[count] = TRI_EOF;
+				// Copy the triangle indices into the leaf triangles array
+				mLeafTriangleIndex = leafTriangles.size(); // assign the array start location for these leaf triangles.
+				leafTriangles.push_back(count);
+				for (TriVector::const_iterator i=triangles.begin(); i!=triangles.end(); ++i)
+				{
+					leafTriangles.push_back( *i );
+				}
 			}
 			else
 			{
@@ -728,12 +762,16 @@ public:
 				BoundsAABB b1,b2;
 				splitRect(axis,mBounds,b1,b2,center);
 
+				// Compute two bounding boxes based upon the split of the longest axis
+
 				BoundsAABB leftBounds,rightBounds;
 
 				TriVector leftTriangles;
 				TriVector rightTriangles;
 
 
+				// Create two arrays; one of all triangles which intersect the 'left' half of the bounding volume node
+				// and another array that includes all triangles which intersect the 'right' half of the bounding volume node.
 				for (TriVector::const_iterator i=triangles.begin(); i!=triangles.end(); ++i)
 				{
 					RmUint32 tri = (*i); 
@@ -757,7 +795,7 @@ public:
 							leftBounds.include(p1);
 							leftBounds.include(p2);
 							leftBounds.include(p3);
-							leftTriangles.push_back(tri);
+							leftTriangles.push_back(tri); // Add this triangle to the 'left triangles' array and revise the left triangles bounding volume
 						}
 
 						if ( b2.containsTriangle(p1,p2,p3))
@@ -770,25 +808,27 @@ public:
 							rightBounds.include(p1);
 							rightBounds.include(p2);
 							rightBounds.include(p3);
-							rightTriangles.push_back(tri);
+							rightTriangles.push_back(tri); // Add this triangle to the 'right triangles' array and revise the right triangles bounding volume.
 						}
 					}
 				}
 
-				if ( !leftTriangles.empty() )
+				if ( !leftTriangles.empty() ) // If there are triangles in the left half then...
 				{
-					leftBounds.clamp(b1);
-					mLeft = callback->getNode();
-					new ( mLeft ) NodeAABB(leftBounds);
-					mLeft->split(leftTriangles,vcount,vertices,tcount,indices,depth+1,maxDepth,minLeafSize,minAxisSize,callback);
+					leftBounds.clamp(b1); // we have to clamp the bounding volume so it stays inside the parent volume.
+					mLeft = callback->getNode();	// get a new AABB node
+					new ( mLeft ) NodeAABB(leftBounds);		// initialize it to default constructor values.  
+					// Then recursively split this node.
+					mLeft->split(leftTriangles,vcount,vertices,tcount,indices,depth+1,maxDepth,minLeafSize,minAxisSize,callback,leafTriangles);
 				}
 
-				if ( !rightTriangles.empty() )
+				if ( !rightTriangles.empty() ) // If there are triangles in the right half then..
 				{
-					rightBounds.clamp(b2);
-					mRight = callback->getNode();
+					rightBounds.clamp(b2);	// clamps the bounding volume so it stays restricted to the size of the parent volume.
+					mRight = callback->getNode(); // allocate and default initialize a new node
 					new ( mRight ) NodeAABB(rightBounds);
-					mRight->split(rightTriangles,vcount,vertices,tcount,indices,depth+1,maxDepth,minLeafSize,minAxisSize,callback);
+					// Recursively split this node.
+					mRight->split(rightTriangles,vcount,vertices,tcount,indices,depth+1,maxDepth,minLeafSize,minAxisSize,callback,leafTriangles);
 				}
 
 			}
@@ -956,7 +996,8 @@ public:
 							RmReal &nearestDistance,
 							NodeInterface *callback,
 							unsigned char *raycastTriangles,
-							unsigned char raycastFrame)
+							unsigned char raycastFrame,
+							const TriVector &leafTriangles)
 		{
 			unsigned acode;
 			if ( !mBounds.containsLineSegment(from,to,acode))
@@ -974,10 +1015,11 @@ public:
 				}
 			}
 
-			if ( mTriIndices )
+			if ( mLeafTriangleIndex != TRI_EOF )
 			{
-				const RmUint32 *scan = mTriIndices;
-				while ( *scan != TRI_EOF )
+				const RmUint32 *scan = &leafTriangles[mLeafTriangleIndex];
+				RmUint32 count = *scan++;
+				for (RmUint32 i=0; i<count; i++)
 				{
 					RmUint32 tri = *scan++;
 					if ( raycastTriangles[tri] != raycastFrame )
@@ -1021,11 +1063,11 @@ public:
 			{
 				if ( mLeft )
 				{
-					mLeft->raycast(hit,from,to,dir,hitLocation,hitNormal,hitDistance,vertices,indices,nearestDistance,callback,raycastTriangles,raycastFrame);
+					mLeft->raycast(hit,from,to,dir,hitLocation,hitNormal,hitDistance,vertices,indices,nearestDistance,callback,raycastTriangles,raycastFrame,leafTriangles);
 				}
 				if ( mRight )
 				{
-					mRight->raycast(hit,from,to,dir,hitLocation,hitNormal,hitDistance,vertices,indices,nearestDistance,callback,raycastTriangles,raycastFrame);
+					mRight->raycast(hit,from,to,dir,hitLocation,hitNormal,hitDistance,vertices,indices,nearestDistance,callback,raycastTriangles,raycastFrame,leafTriangles);
 				}
 			}
 		}
@@ -1033,7 +1075,7 @@ public:
 		NodeAABB		*mLeft;			// left node
 		NodeAABB		*mRight;		// right node
 		BoundsAABB		mBounds;		// bounding volume of node
-		RmUint32	*mTriIndices;	// if it is a leaf node; then these are the triangle indices.
+		RmUint32		mLeafTriangleIndex;	// if it is a leaf node; then these are the triangle indices.
 	};
 
 class MyRaycastMesh : public RaycastMesh, public NodeInterface
@@ -1057,8 +1099,6 @@ public:
 		{
 			mMaxNodeCount+=pow2Table[i];
 		}
-
-
 		mNodes = new NodeAABB[mMaxNodeCount];
 		mNodeCount = 0;
 		mVcount = vcount;
@@ -1067,17 +1107,11 @@ public:
 		mTcount = tcount;
 		mIndices = (RmUint32 *)::malloc(sizeof(RmUint32)*tcount*3);
 		memcpy(mIndices,indices,sizeof(RmUint32)*tcount*3);
-
 		mRaycastTriangles = (unsigned char *)::malloc(tcount);
 		memset(mRaycastTriangles,0,tcount);
-
 		mRoot = getNode();
-
 		mFaceNormals = NULL;
-
-
-
-		new ( mRoot ) NodeAABB(mVcount,mVertices,mTcount,mIndices,maxDepth,minLeafSize,minAxisSize,this);
+		new ( mRoot ) NodeAABB(mVcount,mVertices,mTcount,mIndices,maxDepth,minLeafSize,minAxisSize,this,mLeafTriangles);
 	}
 
 	~MyRaycastMesh(void)
@@ -1143,7 +1177,7 @@ public:
 		}
 #else
 		mRaycastFrame++;
-		mRoot->raycast(ret,from,to,dir,hitLocation,hitNormal,hitDistance,mVertices,mIndices,distance,this,mRaycastTriangles,mRaycastFrame);
+		mRoot->raycast(ret,from,to,dir,hitLocation,hitNormal,hitDistance,mVertices,mIndices,distance,this,mRaycastTriangles,mRaycastFrame,mLeafTriangles);
 #endif
 
 
@@ -1197,16 +1231,16 @@ public:
 
 	unsigned char	mRaycastFrame;
 	unsigned char	*mRaycastTriangles;
-	RmUint32			mVcount;
+	RmUint32		mVcount;
 	RmReal			*mVertices;
 	RmReal			*mFaceNormals;
-	RmUint32			mTcount;
-	RmUint32			*mIndices;
+	RmUint32		mTcount;
+	RmUint32		*mIndices;
 	NodeAABB		*mRoot;
-	RmUint32			mNodeCount;
-	RmUint32			mMaxNodeCount;
+	RmUint32		mNodeCount;
+	RmUint32		mMaxNodeCount;
 	NodeAABB		*mNodes;
-
+	TriVector		mLeafTriangles;
 };
 
 };
