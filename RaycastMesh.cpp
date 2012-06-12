@@ -243,191 +243,6 @@ static RmReal computePlane(const RmReal *A,const RmReal *B,const RmReal *C,RmRea
 }
 
 
-/********************************************************/
-/* AABB-triangle overlap test code                      */
-/* by Tomas Akenine-Möller                              */
-/* Function: int triBoxOverlap(RmReal boxcenter[3],      */
-/*          RmReal boxhalfsize[3],RmReal triverts[3][3]); */
-/* History:                                             */
-/*   2001-03-05: released the code in its first version */
-/*   2001-06-18: changed the order of the tests, faster */
-/*                                                      */
-/* Acknowledgement: Many thanks to Pierre Terdiman for  */
-/* suggestions and discussions on how to optimize code. */
-/* Thanks to David Hunt for finding a ">="-bug!         */
-/********************************************************/
-#include <math.h>
-#include <stdio.h>
-
-#define X 0
-#define Y 1
-#define Z 2
-
-#define CROSS(dest,v1,v2) \
-	dest[0]=v1[1]*v2[2]-v1[2]*v2[1]; \
-	dest[1]=v1[2]*v2[0]-v1[0]*v2[2]; \
-	dest[2]=v1[0]*v2[1]-v1[1]*v2[0];
-
-#define DOT(v1,v2) (v1[0]*v2[0]+v1[1]*v2[1]+v1[2]*v2[2])
-
-#define SUB(dest,v1,v2) \
-	dest[0]=v1[0]-v2[0]; \
-	dest[1]=v1[1]-v2[1]; \
-	dest[2]=v1[2]-v2[2];
-
-#define FINDMINMAX(x0,x1,x2,min,max) \
-	min = max = x0;   \
-	if(x1<min) min=x1;\
-	if(x1>max) max=x1;\
-	if(x2<min) min=x2;\
-	if(x2>max) max=x2;
-
-int planeBoxOverlap(RmReal normal[3],RmReal d, RmReal maxbox[3])
-{
-	int q;
-	RmReal vmin[3],vmax[3];
-	for(q=X;q<=Z;q++)
-	{
-		if(normal[q]>0.0f)
-		{
-			vmin[q]=-maxbox[q];
-			vmax[q]=maxbox[q];
-		}
-		else
-		{
-			vmin[q]=maxbox[q];
-			vmax[q]=-maxbox[q];
-		}
-	}
-	if(DOT(normal,vmin)+d>0.0f) return 0;
-	if(DOT(normal,vmax)+d>=0.0f) return 1;
-
-	return 0;
-}
-
-
-/*======================== X-tests ========================*/
-#define AXISTEST_X01(a, b, fa, fb)             \
-	p0 = a*v0[Y] - b*v0[Z];                    \
-	p2 = a*v2[Y] - b*v2[Z];                    \
-	if(p0<p2) {min=p0; max=p2;} else {min=p2; max=p0;} \
-	rad = fa * boxhalfsize[Y] + fb * boxhalfsize[Z];   \
-	if(min>rad || max<-rad) return 0;
-
-#define AXISTEST_X2(a, b, fa, fb)              \
-	p0 = a*v0[Y] - b*v0[Z];                    \
-	p1 = a*v1[Y] - b*v1[Z];                    \
-	if(p0<p1) {min=p0; max=p1;} else {min=p1; max=p0;} \
-	rad = fa * boxhalfsize[Y] + fb * boxhalfsize[Z];   \
-	if(min>rad || max<-rad) return 0;
-
-/*======================== Y-tests ========================*/
-#define AXISTEST_Y02(a, b, fa, fb)             \
-	p0 = -a*v0[X] + b*v0[Z];                   \
-	p2 = -a*v2[X] + b*v2[Z];                       \
-	if(p0<p2) {min=p0; max=p2;} else {min=p2; max=p0;} \
-	rad = fa * boxhalfsize[X] + fb * boxhalfsize[Z];   \
-	if(min>rad || max<-rad) return 0;
-
-#define AXISTEST_Y1(a, b, fa, fb)              \
-	p0 = -a*v0[X] + b*v0[Z];                   \
-	p1 = -a*v1[X] + b*v1[Z];                       \
-	if(p0<p1) {min=p0; max=p1;} else {min=p1; max=p0;} \
-	rad = fa * boxhalfsize[X] + fb * boxhalfsize[Z];   \
-	if(min>rad || max<-rad) return 0;
-
-/*======================== Z-tests ========================*/
-
-#define AXISTEST_Z12(a, b, fa, fb)             \
-	p1 = a*v1[X] - b*v1[Y];                    \
-	p2 = a*v2[X] - b*v2[Y];                    \
-	if(p2<p1) {min=p2; max=p1;} else {min=p1; max=p2;} \
-	rad = fa * boxhalfsize[X] + fb * boxhalfsize[Y];   \
-	if(min>rad || max<-rad) return 0;
-
-#define AXISTEST_Z0(a, b, fa, fb)              \
-	p0 = a*v0[X] - b*v0[Y];                \
-	p1 = a*v1[X] - b*v1[Y];                    \
-	if(p0<p1) {min=p0; max=p1;} else {min=p1; max=p0;} \
-	rad = fa * boxhalfsize[X] + fb * boxhalfsize[Y];   \
-	if(min>rad || max<-rad) return 0;
-
-int triBoxOverlap(RmReal boxcenter[3],RmReal boxhalfsize[3],RmReal triverts[3][3])
-{
-
-	/*    use separating axis theorem to test overlap between triangle and box */
-	/*    need to test for overlap in these directions: */
-	/*    1) the {x,y,z}-directions (actually, since we use the AABB of the triangle */
-	/*       we do not even need to test these) */
-	/*    2) normal of the triangle */
-	/*    3) crossproduct(edge from tri, {x,y,z}-directin) */
-	/*       this gives 3x3=9 more tests */
-	RmReal v0[3],v1[3],v2[3];
-	RmReal min,max,d,p0,p1,p2,rad,fex,fey,fez;
-	RmReal normal[3],e0[3],e1[3],e2[3];
-
-	/* This is the fastest branch on Sun */
-	/* move everything so that the boxcenter is in (0,0,0) */
-	SUB(v0,triverts[0],boxcenter);
-	SUB(v1,triverts[1],boxcenter);
-	SUB(v2,triverts[2],boxcenter);
-
-	/* compute triangle edges */
-	SUB(e0,v1,v0);      /* tri edge 0 */
-	SUB(e1,v2,v1);      /* tri edge 1 */
-	SUB(e2,v0,v2);      /* tri edge 2 */
-
-	/* Bullet 3:  */
-	/*  test the 9 tests first (this was faster) */
-	fex = fabs(e0[X]);
-	fey = fabs(e0[Y]);
-	fez = fabs(e0[Z]);
-	AXISTEST_X01(e0[Z], e0[Y], fez, fey);
-	AXISTEST_Y02(e0[Z], e0[X], fez, fex);
-	AXISTEST_Z12(e0[Y], e0[X], fey, fex);
-
-	fex = fabs(e1[X]);
-	fey = fabs(e1[Y]);
-	fez = fabs(e1[Z]);
-	AXISTEST_X01(e1[Z], e1[Y], fez, fey);
-	AXISTEST_Y02(e1[Z], e1[X], fez, fex);
-	AXISTEST_Z0(e1[Y], e1[X], fey, fex);
-
-	fex = fabs(e2[X]);
-	fey = fabs(e2[Y]);
-	fez = fabs(e2[Z]);
-	AXISTEST_X2(e2[Z], e2[Y], fez, fey);
-	AXISTEST_Y1(e2[Z], e2[X], fez, fex);
-	AXISTEST_Z12(e2[Y], e2[X], fey, fex);
-
-	/* Bullet 1: */
-	/*  first test overlap in the {x,y,z}-directions */
-	/*  find min, max of the triangle each direction, and test for overlap in */
-	/*  that direction -- this is equivalent to testing a minimal AABB around */
-	/*  the triangle against the AABB */
-
-	/* test in X-direction */
-	FINDMINMAX(v0[X],v1[X],v2[X],min,max);
-	if(min>boxhalfsize[X] || max<-boxhalfsize[X]) return 0;
-
-	/* test in Y-direction */
-	FINDMINMAX(v0[Y],v1[Y],v2[Y],min,max);
-	if(min>boxhalfsize[Y] || max<-boxhalfsize[Y]) return 0;
-
-	/* test in Z-direction */
-	FINDMINMAX(v0[Z],v1[Z],v2[Z],min,max);
-	if(min>boxhalfsize[Z] || max<-boxhalfsize[Z]) return 0;
-
-	/* Bullet 2: */
-	/*  test if the box intersects the plane of the triangle */
-	/*  compute plane equation of triangle: normal*x+d=0 */
-	CROSS(normal,e0,e1);
-	d=-DOT(normal,v0);  /* plane eq: normal.x+d=0 */
-	if(!planeBoxOverlap(normal,d,boxhalfsize)) return 0;
-
-	return 1;   /* box and triangle overlaps */
-}
-
 #define TRI_EOF 0xFFFFFFFF
 
 enum AxisAABB
@@ -439,12 +254,12 @@ enum AxisAABB
 
 enum ClipCode
 {
-	OLEFT   =       (1<<0),
-	ORIGHT  =       (1<<1),
-	OTOP    =       (1<<2),
-	OBOTTOM =       (1<<3),
-	OFRONT  =       (1<<4),
-	OBACK   =       (1<<5),
+	CC_MINX   =       (1<<0),
+	CC_MAXX  =       (1<<1),
+	CC_MINY   =       (1<<2),
+	CC_MAXY	 =       (1<<3),
+	CC_MINZ  =       (1<<4),
+	CC_MAXZ   =       (1<<5),
 };
 
 
@@ -507,7 +322,6 @@ public:
 		return true;
 	}
 
-#if 1
 	bool containsTriangle(const RmReal *p1,const RmReal *p2,const RmReal *p3) const
 	{
 		BoundsAABB b;
@@ -517,39 +331,68 @@ public:
 		b.include(p3);
 		return intersects(b);
 	}
-#else  // This techinque fails; need to debug why later
-	bool containsTriangle(const RmReal *p1,const RmReal *p2,const RmReal *p3) const
+
+	bool containsTriangleExact(const RmReal *p1,const RmReal *p2,const RmReal *p3,RmUint32 &orCode) const
 	{
-		RmReal boxCenter[3];
-		RmReal	boxHalfSize[3];
-		RmReal triVerts[3][3];
+		bool ret = false;
 
-		boxCenter[0] = (mMin[0]+mMax[0])*0.5f;
-		boxCenter[1] = (mMin[1]+mMax[1])*0.5f;
-		boxCenter[2] = (mMin[2]+mMax[2])*0.5f;
+		RmUint32 andCode;
+		orCode = getClipCode(p1,p2,p3,andCode);
+		if ( andCode == 0 )
+		{
+			ret = true;
+		}
 
-		boxHalfSize[0] = (mMax[0]-mMin[0])*0.5f;
-		boxHalfSize[1] = (mMax[1]-mMin[1])*0.5f;
-		boxHalfSize[2] = (mMax[2]-mMin[2])*0.5f;
-
-		triVerts[0][0] = p1[0];
-		triVerts[0][1] = p1[1];
-		triVerts[0][2] = p1[2];
-
-		triVerts[1][0] = p2[0];
-		triVerts[1][1] = p2[1];
-		triVerts[1][2] = p2[2];
-
-		triVerts[2][0] = p3[0];
-		triVerts[2][1] = p3[1];
-		triVerts[2][2] = p3[2];
-
-		int ret = triBoxOverlap(boxCenter,boxHalfSize,triVerts);
-
-		return ret == 1 ? true : false;
+		return ret;
 	}
-#endif
-	void clamp(const BoundsAABB &aabb)
+
+	inline RmUint32 getClipCode(const RmReal *p1,const RmReal *p2,const RmReal *p3,RmUint32 &andCode) const
+	{
+		andCode = 0xFFFFFFFF;
+		RmUint32 c1 = getClipCode(p1);
+		RmUint32 c2 = getClipCode(p2);
+		RmUint32 c3 = getClipCode(p3);
+		andCode&=c1;
+		andCode&=c2;
+		andCode&=c3;
+		return c1|c2|c3;
+	}
+
+	inline RmUint32 getClipCode(const RmReal *p) const
+	{
+		RmUint32 ret = 0;
+
+		if ( p[0] < mMin[0] ) 
+		{
+			ret|=CC_MINX;
+		}
+		else if ( p[0] > mMax[0] )
+		{
+			ret|=CC_MAXX;
+		}
+
+		if ( p[1] < mMin[1] ) 
+		{
+			ret|=CC_MINY;
+		}
+		else if ( p[1] > mMax[1] )
+		{
+			ret|=CC_MAXY;
+		}
+
+		if ( p[2] < mMin[2] ) 
+		{
+			ret|=CC_MINZ;
+		}
+		else if ( p[2] > mMax[2] )
+		{
+			ret|=CC_MAXZ;
+		}
+
+		return ret;
+	}
+
+	inline void clamp(const BoundsAABB &aabb)
 	{
 		if ( mMin[0] < aabb.mMin[0] ) mMin[0] = aabb.mMin[0];
 		if ( mMin[1] < aabb.mMin[1] ) mMin[1] = aabb.mMin[1];
@@ -558,8 +401,6 @@ public:
 		if ( mMax[1] > aabb.mMax[1] ) mMax[1] = aabb.mMax[1];
 		if ( mMax[2] > aabb.mMax[2] ) mMax[2] = aabb.mMax[2];
 	}
-
-
 
 	RmReal		mMin[3];
 	RmReal		mMax[3];
@@ -712,8 +553,8 @@ public:
 						const RmReal *p3 = &vertices[i3*3];
 
 						RmUint32 addCount = 0;
-
-						if ( b1.containsTriangle(p1,p2,p3))
+						RmUint32 orCode=0xFFFFFFFF;
+						if ( b1.containsTriangleExact(p1,p2,p3,orCode))
 						{
 							addCount++;
 							if ( leftTriangles.empty() )
@@ -726,8 +567,8 @@ public:
 							leftBounds.include(p3);
 							leftTriangles.push_back(tri); // Add this triangle to the 'left triangles' array and revise the left triangles bounding volume
 						}
-
-						if ( b2.containsTriangle(p1,p2,p3))
+						// if the orCode is zero; meaning the triangle was fully self-contiained int he left bounding box; then we don't need to test against the right
+						if ( orCode && b2.containsTriangleExact(p1,p2,p3,orCode))
 						{
 							addCount++;
 							if ( rightTriangles.empty() )
@@ -740,11 +581,7 @@ public:
 							rightBounds.include(p3);
 							rightTriangles.push_back(tri); // Add this triangle to the 'right triangles' array and revise the right triangles bounding volume.
 						}
-
-						if ( addCount == 0 )
-						{
-			
-						}
+						assert( addCount );
 					}
 				}
 

@@ -10,7 +10,12 @@
 #include "RaycastMesh.h"
 #include "wavefront.h"
 
+#ifdef _DEBUG
+#define BRUTE_FORCE_VALIDATION 1 // enable this to do exact validation of the AABB raycasting system
+#else
 #define BRUTE_FORCE_VALIDATION 0 // enable this to do exact validation of the AABB raycasting system
+#endif
+
 #define RAYCAST_TOP_DOWN 1
 
 int main(int argc,const char **argv)
