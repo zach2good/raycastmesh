@@ -33,137 +33,130 @@
 
 #pragma warning(disable:4100)
 
-#define USE_BRUTE_FORCE 0
-
 namespace RAYCAST_MESH
 {
 
 typedef std::vector< RmUint32 > TriVector;
 
-		///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-		/**
-		*	A method to compute a ray-AABB intersection.
-		*	Original code by Andrew Woo, from "Graphics Gems", Academic Press, 1990
-		*	Optimized code by Pierre Terdiman, 2000 (~20-30% faster on my Celeron 500)
-		*	Epsilon value added by Klaus Hartmann. (discarding it saves a few cycles only)
-		*
-		*	Hence this version is faster as well as more robust than the original one.
-		*
-		*	Should work provided:
-		*	1) the integer representation of 0.0f is 0x00000000
-		*	2) the sign bit of the RmReal is the most significant one
-		*
-		*	Report bugs: p.terdiman@codercorner.com
-		*
-		*	\param		aabb		[in] the axis-aligned bounding box
-		*	\param		origin		[in] ray origin
-		*	\param		dir			[in] ray direction
-		*	\param		coord		[out] impact coordinates
-		*	\return		true if ray intersects AABB
-		*/
-		///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-		#define RAYAABB_EPSILON 0.00001f
-		//! Integer representation of a RmRealing-point value.
-		#define IR(x)	((RmUint32&)x)
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/**
+*	A method to compute a ray-AABB intersection.
+*	Original code by Andrew Woo, from "Graphics Gems", Academic Press, 1990
+*	Optimized code by Pierre Terdiman, 2000 (~20-30% faster on my Celeron 500)
+*	Epsilon value added by Klaus Hartmann. (discarding it saves a few cycles only)
+*
+*	Hence this version is faster as well as more robust than the original one.
+*
+*	Should work provided:
+*	1) the integer representation of 0.0f is 0x00000000
+*	2) the sign bit of the RmReal is the most significant one
+*
+*	Report bugs: p.terdiman@codercorner.com
+*
+*	\param		aabb		[in] the axis-aligned bounding box
+*	\param		origin		[in] ray origin
+*	\param		dir			[in] ray direction
+*	\param		coord		[out] impact coordinates
+*	\return		true if ray intersects AABB
+*/
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#define RAYAABB_EPSILON 0.00001f
+//! Integer representation of a RmRealing-point value.
+#define IR(x)	((RmUint32&)x)
 
-		bool intersectRayAABB(const RmReal MinB[3],const RmReal MaxB[3],const RmReal origin[3],const RmReal dir[3],RmReal coord[3])
+bool intersectRayAABB(const RmReal MinB[3],const RmReal MaxB[3],const RmReal origin[3],const RmReal dir[3],RmReal coord[3])
+{
+	bool Inside = true;
+	RmReal MaxT[3];
+	MaxT[0]=MaxT[1]=MaxT[2]=-1.0f;
+
+	// Find candidate planes.
+	for(RmUint32 i=0;i<3;i++)
+	{
+		if(origin[i] < MinB[i])
 		{
-			bool Inside = true;
-			RmReal MaxT[3];
-			MaxT[0]=MaxT[1]=MaxT[2]=-1.0f;
+			coord[i]	= MinB[i];
+			Inside		= false;
 
-			// Find candidate planes.
-			for(RmUint32 i=0;i<3;i++)
-			{
-				if(origin[i] < MinB[i])
-				{
-					coord[i]	= MinB[i];
-					Inside		= false;
-
-					// Calculate T distances to candidate planes
-					if(IR(dir[i]))	MaxT[i] = (MinB[i] - origin[i]) / dir[i];
-				}
-				else if(origin[i] > MaxB[i])
-				{
-					coord[i]	= MaxB[i];
-					Inside		= false;
-
-					// Calculate T distances to candidate planes
-					if(IR(dir[i]))	MaxT[i] = (MaxB[i] - origin[i]) / dir[i];
-				}
-			}
-
-			// Ray origin inside bounding box
-			if(Inside)
-			{
-				coord[0] = origin[0];
-				coord[1] = origin[1];
-				coord[2] = origin[2];
-				return true;
-			}
-
-			// Get largest of the maxT's for final choice of intersection
-			RmUint32 WhichPlane = 0;
-			if(MaxT[1] > MaxT[WhichPlane])	WhichPlane = 1;
-			if(MaxT[2] > MaxT[WhichPlane])	WhichPlane = 2;
-
-			// Check final candidate actually inside box
-			if(IR(MaxT[WhichPlane])&0x80000000) return false;
-
-			for(RmUint32 i=0;i<3;i++)
-			{
-				if(i!=WhichPlane)
-				{
-					coord[i] = origin[i] + MaxT[WhichPlane] * dir[i];
-					#ifdef RAYAABB_EPSILON
-					if(coord[i] < MinB[i] - RAYAABB_EPSILON || coord[i] > MaxB[i] + RAYAABB_EPSILON)	return false;
-					#else
-					if(coord[i] < MinB[i] || coord[i] > MaxB[i])	return false;
-					#endif
-				}
-			}
-			return true;	// ray hits box
+			// Calculate T distances to candidate planes
+			if(IR(dir[i]))	MaxT[i] = (MinB[i] - origin[i]) / dir[i];
 		}
-
-
-
-
-		bool intersectLineSegmentAABB(const RmReal bmin[3],const RmReal bmax[3],const RmReal p1[3],const RmReal dir[3],RmReal &dist,RmReal intersect[3])
+		else if(origin[i] > MaxB[i])
 		{
-			bool ret = false;
+			coord[i]	= MaxB[i];
+			Inside		= false;
 
-			if ( dist > RAYAABB_EPSILON )
-			{
-				ret = intersectRayAABB(bmin,bmax,p1,dir,intersect);
-				if ( ret )
-				{
-					RmReal dx = p1[0]-intersect[0];
-					RmReal dy = p1[1]-intersect[1];
-					RmReal dz = p1[2]-intersect[2];
-					RmReal d = dx*dx+dy*dy+dz*dz;
-					if ( d < dist*dist )
-					{
-						dist = sqrtf(d);
-					}
-					else
-					{
-						ret = false;
-					}
-				}
-			}
-			return ret;
+			// Calculate T distances to candidate planes
+			if(IR(dir[i]))	MaxT[i] = (MaxB[i] - origin[i]) / dir[i];
 		}
+	}
+
+	// Ray origin inside bounding box
+	if(Inside)
+	{
+		coord[0] = origin[0];
+		coord[1] = origin[1];
+		coord[2] = origin[2];
+		return true;
+	}
+
+	// Get largest of the maxT's for final choice of intersection
+	RmUint32 WhichPlane = 0;
+	if(MaxT[1] > MaxT[WhichPlane])	WhichPlane = 1;
+	if(MaxT[2] > MaxT[WhichPlane])	WhichPlane = 2;
+
+	// Check final candidate actually inside box
+	if(IR(MaxT[WhichPlane])&0x80000000) return false;
+
+	for(RmUint32 i=0;i<3;i++)
+	{
+		if(i!=WhichPlane)
+		{
+			coord[i] = origin[i] + MaxT[WhichPlane] * dir[i];
+			#ifdef RAYAABB_EPSILON
+			if(coord[i] < MinB[i] - RAYAABB_EPSILON || coord[i] > MaxB[i] + RAYAABB_EPSILON)	return false;
+			#else
+			if(coord[i] < MinB[i] || coord[i] > MaxB[i])	return false;
+			#endif
+		}
+	}
+	return true;	// ray hits box
+}
 
 
 
+
+bool intersectLineSegmentAABB(const RmReal bmin[3],const RmReal bmax[3],const RmReal p1[3],const RmReal dir[3],RmReal &dist,RmReal intersect[3])
+{
+	bool ret = false;
+
+	if ( dist > RAYAABB_EPSILON )
+	{
+		ret = intersectRayAABB(bmin,bmax,p1,dir,intersect);
+		if ( ret )
+		{
+			RmReal dx = p1[0]-intersect[0];
+			RmReal dy = p1[1]-intersect[1];
+			RmReal dz = p1[2]-intersect[2];
+			RmReal d = dx*dx+dy*dy+dz*dz;
+			if ( d < dist*dist )
+			{
+				dist = sqrtf(d);
+			}
+			else
+			{
+				ret = false;
+			}
+		}
+	}
+	return ret;
+}
 
 /* a = b - c */
 #define vector(a,b,c) \
 	(a)[0] = (b)[0] - (c)[0];	\
 	(a)[1] = (b)[1] - (c)[1];	\
 	(a)[2] = (b)[2] - (c)[2];
-
-
 
 #define innerProduct(v,q) \
 	((v)[0] * (q)[0] + \
@@ -506,6 +499,25 @@ public:
 		center[2] = (mMin[2]+mMax[2])*0.5f;
 	}
 
+	bool intersects(const BoundsAABB &b) const
+	{
+		if ((mMin[0] > b.mMax[0]) || (b.mMin[0] > mMax[0])) return false;
+		if ((mMin[1] > b.mMax[1]) || (b.mMin[1] > mMax[1])) return false;
+		if ((mMin[2] > b.mMax[2]) || (b.mMin[2] > mMax[2])) return false;
+		return true;
+	}
+
+#if 1
+	bool containsTriangle(const RmReal *p1,const RmReal *p2,const RmReal *p3) const
+	{
+		BoundsAABB b;
+		b.setMin(p1);
+		b.setMax(p1);
+		b.include(p2);
+		b.include(p3);
+		return intersects(b);
+	}
+#else  // This techinque fails; need to debug why later
 	bool containsTriangle(const RmReal *p1,const RmReal *p2,const RmReal *p3) const
 	{
 		RmReal boxCenter[3];
@@ -536,6 +548,7 @@ public:
 
 		return ret == 1 ? true : false;
 	}
+#endif
 	void clamp(const BoundsAABB &aabb)
 	{
 		if ( mMin[0] < aabb.mMin[0] ) mMin[0] = aabb.mMin[0];
@@ -637,11 +650,13 @@ public:
 
 			AxisAABB axis = AABB_XAXIS;
 			RmReal laxis = dx;
+
 			if ( dy > dx )
 			{
 				axis = AABB_YAXIS;
 				laxis = dy;
 			}
+
 			if ( dz > dx && dz > dy )
 			{
 				axis = AABB_ZAXIS;
@@ -661,7 +676,8 @@ public:
 				leafTriangles.push_back(count);
 				for (TriVector::const_iterator i=triangles.begin(); i!=triangles.end(); ++i)
 				{
-					leafTriangles.push_back( *i );
+					RmUint32 tri = *i;
+					leafTriangles.push_back(tri);
 				}
 			}
 			else
@@ -683,6 +699,7 @@ public:
 				// and another array that includes all triangles which intersect the 'right' half of the bounding volume node.
 				for (TriVector::const_iterator i=triangles.begin(); i!=triangles.end(); ++i)
 				{
+
 					RmUint32 tri = (*i); 
 
 					{
@@ -694,8 +711,11 @@ public:
 						const RmReal *p2 = &vertices[i2*3];
 						const RmReal *p3 = &vertices[i3*3];
 
+						RmUint32 addCount = 0;
+
 						if ( b1.containsTriangle(p1,p2,p3))
 						{
+							addCount++;
 							if ( leftTriangles.empty() )
 							{
 								leftBounds.setMin(p1);
@@ -709,6 +729,7 @@ public:
 
 						if ( b2.containsTriangle(p1,p2,p3))
 						{
+							addCount++;
 							if ( rightTriangles.empty() )
 							{
 								rightBounds.setMin(p1);
@@ -718,6 +739,11 @@ public:
 							rightBounds.include(p2);
 							rightBounds.include(p3);
 							rightTriangles.push_back(tri); // Add this triangle to the 'right triangles' array and revise the right triangles bounding volume.
+						}
+
+						if ( addCount == 0 )
+						{
+			
 						}
 					}
 				}
@@ -789,9 +815,10 @@ public:
 							const RmUint32 *indices,
 							RmReal &nearestDistance,
 							NodeInterface *callback,
-							unsigned char *raycastTriangles,
-							unsigned char raycastFrame,
-							const TriVector &leafTriangles)
+							RmUint32 *raycastTriangles,
+							RmUint32 raycastFrame,
+							const TriVector &leafTriangles,
+							RmUint32 &nearestTriIndex)
 		{
 			RmReal sect[3];
 			RmReal nd = nearestDistance;
@@ -799,7 +826,6 @@ public:
 			{
 				return;	
 			}
-
 			if ( mLeafTriangleIndex != TRI_EOF )
 			{
 				const RmUint32 *scan = &leafTriangles[mLeafTriangleIndex];
@@ -821,7 +847,12 @@ public:
 						RmReal t;
 						if ( rayIntersectsTriangle(from,dir,p1,p2,p3,t))
 						{
-							if ( t < nearestDistance )
+							bool accept = false;
+							if ( t == nearestDistance && tri < nearestTriIndex )
+							{
+								accept = true;
+							}
+							if ( t < nearestDistance || accept )
 							{
 								nearestDistance = t;
 								if ( hitLocation )
@@ -838,6 +869,7 @@ public:
 								{
 									*hitDistance = t;
 								}
+								nearestTriIndex = tri;
 								hit = true;
 							}
 						}
@@ -848,11 +880,11 @@ public:
 			{
 				if ( mLeft )
 				{
-					mLeft->raycast(hit,from,to,dir,hitLocation,hitNormal,hitDistance,vertices,indices,nearestDistance,callback,raycastTriangles,raycastFrame,leafTriangles);
+					mLeft->raycast(hit,from,to,dir,hitLocation,hitNormal,hitDistance,vertices,indices,nearestDistance,callback,raycastTriangles,raycastFrame,leafTriangles,nearestTriIndex);
 				}
 				if ( mRight )
 				{
-					mRight->raycast(hit,from,to,dir,hitLocation,hitNormal,hitDistance,vertices,indices,nearestDistance,callback,raycastTriangles,raycastFrame,leafTriangles);
+					mRight->raycast(hit,from,to,dir,hitLocation,hitNormal,hitDistance,vertices,indices,nearestDistance,callback,raycastTriangles,raycastFrame,leafTriangles,nearestTriIndex);
 				}
 			}
 		}
@@ -892,8 +924,8 @@ public:
 		mTcount = tcount;
 		mIndices = (RmUint32 *)::malloc(sizeof(RmUint32)*tcount*3);
 		memcpy(mIndices,indices,sizeof(RmUint32)*tcount*3);
-		mRaycastTriangles = (unsigned char *)::malloc(tcount);
-		memset(mRaycastTriangles,0,tcount);
+		mRaycastTriangles = (RmUint32 *)::malloc(tcount*sizeof(RmUint32));
+		memset(mRaycastTriangles,0,tcount*sizeof(RmUint32));
 		mRoot = getNode();
 		mFaceNormals = NULL;
 		new ( mRoot ) NodeAABB(mVcount,mVertices,mTcount,mIndices,maxDepth,minLeafSize,minAxisSize,this,mLeafTriangles);
@@ -922,50 +954,9 @@ public:
 		dir[0]*=recipDistance;
 		dir[1]*=recipDistance;
 		dir[2]*=recipDistance;
-#if USE_BRUTE_FORCE
-		const RmUint32 *indices = mIndices;
-		const RmReal *vertices = mVertices;
-		RmReal nearestDistance = distance;
-		for (RmUint32 tri=0; tri<mTcount; tri++)
-		{
-			RmUint32 i1 = indices[tri*3+0];
-			RmUint32 i2 = indices[tri*3+1];
-			RmUint32 i3 = indices[tri*3+2];
-
-			const RmReal *p1 = &vertices[i1*3];
-			const RmReal *p2 = &vertices[i2*3];
-			const RmReal *p3 = &vertices[i3*3];
-
-			RmReal t;
-			if ( rayIntersectsTriangle(from,dir,p1,p2,p3,t))
-			{
-				if ( t < nearestDistance )
-				{
-					nearestDistance = t;
-					if ( hitLocation )
-					{
-						hitLocation[0] = from[0]+dir[0]*t;
-						hitLocation[1] = from[1]+dir[1]*t;
-						hitLocation[2] = from[2]+dir[2]*t;
-					}
-					if ( hitNormal )
-					{
-						getFaceNormal(tri,hitNormal);
-					}
-					if ( hitDistance )
-					{
-						*hitDistance = t;
-					}
-					ret = true;
-				}
-			}
-		}
-#else
 		mRaycastFrame++;
-		mRoot->raycast(ret,from,to,dir,hitLocation,hitNormal,hitDistance,mVertices,mIndices,distance,this,mRaycastTriangles,mRaycastFrame,mLeafTriangles);
-#endif
-
-
+		RmUint32 nearestTriIndex=TRI_EOF;
+		mRoot->raycast(ret,from,to,dir,hitLocation,hitNormal,hitDistance,mVertices,mIndices,distance,this,mRaycastTriangles,mRaycastFrame,mLeafTriangles,nearestTriIndex);
 		return ret;
 	}
 
@@ -998,13 +989,13 @@ public:
 			mFaceNormals = (RmReal *)::malloc(sizeof(RmReal)*3*mTcount);
 			for (RmUint32 i=0; i<mTcount; i++)
 			{
-				RmUint32 i1 = mIndices[i*3+0];
-				RmUint32 i2 = mIndices[i*3+1];
-				RmUint32 i3 = mIndices[i*3+2];
+				RmUint32 i1		= mIndices[i*3+0];
+				RmUint32 i2		= mIndices[i*3+1];
+				RmUint32 i3		= mIndices[i*3+2];
 				const RmReal*p1 = &mVertices[i1*3];
 				const RmReal*p2 = &mVertices[i2*3];
 				const RmReal*p3 = &mVertices[i3*3];
-				RmReal *dest = &mFaceNormals[i*3];
+				RmReal *dest	= &mFaceNormals[i*3];
 				computePlane(p3,p2,p1,dest);
 			}
 		}
@@ -1014,8 +1005,67 @@ public:
 		faceNormal[2] = src[2];
 	}
 
-	unsigned char	mRaycastFrame;
-	unsigned char	*mRaycastTriangles;
+	virtual bool bruteForceRaycast(const RmReal *from,const RmReal *to,RmReal *hitLocation,RmReal *hitNormal,RmReal *hitDistance)
+	{
+		bool ret = false;
+
+		RmReal dir[3];
+
+		dir[0] = to[0] - from[0];
+		dir[1] = to[1] - from[1];
+		dir[2] = to[2] - from[2];
+
+		RmReal distance = sqrtf( dir[0]*dir[0] + dir[1]*dir[1]+dir[2]*dir[2] );
+		if ( distance < 0.0000000001f ) return false;
+		RmReal recipDistance = 1.0f / distance;
+		dir[0]*=recipDistance;
+		dir[1]*=recipDistance;
+		dir[2]*=recipDistance;
+		const RmUint32 *indices = mIndices;
+		const RmReal *vertices = mVertices;
+		RmReal nearestDistance = distance;
+
+		for (RmUint32 tri=0; tri<mTcount; tri++)
+		{
+			RmUint32 i1 = indices[tri*3+0];
+			RmUint32 i2 = indices[tri*3+1];
+			RmUint32 i3 = indices[tri*3+2];
+
+			const RmReal *p1 = &vertices[i1*3];
+			const RmReal *p2 = &vertices[i2*3];
+			const RmReal *p3 = &vertices[i3*3];
+
+			RmReal t;
+			if ( rayIntersectsTriangle(from,dir,p1,p2,p3,t))
+			{
+				if ( t < nearestDistance )
+				{
+					nearestDistance = t;
+					if ( hitLocation )
+					{
+						hitLocation[0] = from[0]+dir[0]*t;
+						hitLocation[1] = from[1]+dir[1]*t;
+						hitLocation[2] = from[2]+dir[2]*t;
+					}
+
+					if ( hitNormal )
+					{
+						getFaceNormal(tri,hitNormal);
+					}
+
+					if ( hitDistance )
+					{
+						*hitDistance = t;
+					}
+					ret = true;
+				}
+			}
+		}
+		return ret;
+	}
+
+	RmUint32		mRaycastFrame;
+	RmUint32		*mRaycastTriangles;
 	RmUint32		mVcount;
 	RmReal			*mVertices;
 	RmReal			*mFaceNormals;

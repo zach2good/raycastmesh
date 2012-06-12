@@ -39,10 +39,19 @@ The official source can be found at:  http://code.google.com/p/raycastmesh/
 
 To run the demo type:
 
-RaycastMesh deer_bound.obj
+RaycastMesh hornbug.obj
 
 This will load the Wavefront OBJ file 'deer_bound.obj', then create a 'RaycastMesh'
 and then perform one million raycasts against it.
 
-It will then write out an image file 'RaycastMesh.png' to demonstrate that the 
+It will then write out an image file 'RaycastMesh.png' to demonstrate that the
 raycasts all worked correctly.  You can feed it other wavefront OBJ files for testing.
+
+*** Release note:  June 12, 2012
+
+I was notified of some bugs with this code and have since fixed them.
+
+When building the AABB some triangles were not being added due to an error in the triangle
+box intersection routine. I did a simpler test and fixed that problem.  Not sure why
+the original triangle/box intersect routine fails; it was copy/paste off the internet.
+
