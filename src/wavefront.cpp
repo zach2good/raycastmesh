@@ -797,12 +797,12 @@ bool WavefrontObj::saveObj(const char* fname, int vcount, const float* vertices,
     {
         for (int i = 0; i < vcount; i++)
         {
-            fprintf(fph, "v %0.9f %0.9f %0.9f\r\n", vertices[0], vertices[1], vertices[2]);
+            fprintf(fph, "v %0.9f %0.9f %0.9f\n", vertices[0], vertices[1], vertices[2]);
             vertices += 3;
         }
         for (int i = 0; i < tcount; i++)
         {
-            fprintf(fph, "f %d %d %d\r\n", indices[0] + 1, indices[1] + 1, indices[2] + 1);
+            fprintf(fph, "f %d %d %d\n", indices[0] + 1, indices[1] + 1, indices[2] + 1);
             indices += 3;
         }
         fclose(fph);

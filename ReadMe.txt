@@ -1,3 +1,11 @@
+```
+mkdir build
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make
+./raycastmeshtest ../models/Ship_bound_for_Mhaura.obj
+```
+
+## Original Readme
 
 This code snippet allows you to create an axis aligned
 bounding volume tree for a triangle mesh so that you
